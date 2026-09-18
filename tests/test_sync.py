@@ -11,7 +11,16 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base
-from app.models import Category, Order, OrderItem, Product, ProductPrice, SyncRun, SyncState
+from app.models import (
+    Category,
+    Order,
+    OrderItem,
+    Product,
+    ProductPrice,
+    SyncRun,
+    SyncState,
+    TrayEntity,
+)
 from app import sync
 
 BR = ZoneInfo("America/Sao_Paulo")
@@ -113,6 +122,40 @@ async def test_order_sync_fetches_detail_and_is_idempotent(sync_db, monkeypatch)
     assert second["records"] == 1
     assert fake.list_cursors == [None, "2026-08-12T12:00:00+00:00"]
     assert fake.detail_calls == ["10", "10"]
+
+
+class ExtendedResourceAdaptor:
+    async def list(self, resource: str, cursor: str | None):
+        return {
+            "data": [
+                {
+                    "id": "variant-1",
+                    "product_id": "product-1",
+                    "stock": 7,
+                    "modified": "2026-09-17T12:00:00-03:00",
+                    "images": [{"url": "https://example.test/image.jpg"}],
+                }
+            ],
+            "pageCursor": "2026-09-17T12:00:00-03:00",
+            "nextCursor": None,
+        }
+
+
+@pytest.mark.asyncio
+async def test_extended_resource_is_preserved_idempotently(sync_db, monkeypatch):
+    monkeypatch.setattr(sync, "adaptor", ExtendedResourceAdaptor())
+
+    first = await sync.sync_resource("variants", full=True)
+    second = await sync.sync_resource("variants", full=True)
+
+    assert first["status"] == "success"
+    assert second["status"] == "success"
+    with sync_db() as db:
+        rows = db.scalars(select(TrayEntity)).all()
+        assert len(rows) == 1
+        assert rows[0].resource == "variants"
+        assert rows[0].source_id == "variant-1"
+        assert rows[0].payload["images"][0]["url"].endswith("image.jpg")
 
 
 class ListWithItemsAdaptor:

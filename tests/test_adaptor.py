@@ -53,6 +53,46 @@ async def test_list_translates_tray_products_and_pagination(monkeypatch):
     assert client._headers() == {"Authorization": "Bearer internal-token"}
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("resource", "path", "key"),
+    [
+        ("product-properties", "/internal/products/properties", "properties"),
+        ("variants", "/internal/products/variants", "variants"),
+        ("brands", "/internal/brands", "brands"),
+        ("kits", "/internal/kits", "kits"),
+        ("customer-addresses", "/internal/customer-addresses", "addresses"),
+        ("coupons", "/internal/coupons", "coupons"),
+        (
+            "distribution-centers",
+            "/internal/inventory/distribution-centers",
+            "distribution_centers",
+        ),
+    ],
+)
+async def test_extended_resources_preserve_normalized_payload(
+    monkeypatch,
+    resource,
+    path,
+    key,
+):
+    async def fake_get(self, requested_path, *, params=None, retries=8):
+        assert requested_path == path
+        assert params == {"page": 1, "limit": 50}
+        return {
+            "paging": {"total": 1, "page": 1, "limit": 50},
+            key: [{"id": "source-1", "name": "Preservado", "extra": {"x": 1}}],
+        }
+
+    monkeypatch.setattr(Adaptor, "_get", fake_get)
+
+    result = await Adaptor().list(resource)
+
+    assert result["data"] == [
+        {"id": "source-1", "name": "Preservado", "extra": {"x": 1}}
+    ]
+
+
 def test_order_complete_preserves_every_item_and_discount():
     result = _order_detail(
         {

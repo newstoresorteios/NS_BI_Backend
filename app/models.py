@@ -216,6 +216,22 @@ class CommercialPolicy(Base):
     raw: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
+class TrayEntity(Base):
+    """Raw normalized Tray entities not yet promoted to analytical dimensions."""
+
+    __tablename__ = "tray_entities"
+    __table_args__ = (
+        UniqueConstraint("resource", "source_id", name="uq_tray_entities_resource_source"),
+        Index("ix_tray_entities_resource", "resource"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    resource: Mapped[str] = mapped_column(String(80), nullable=False)
+    source_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    source_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class SyncState(Base):
     __tablename__ = "sync_states"
     resource: Mapped[str] = mapped_column(String(50), primary_key=True)

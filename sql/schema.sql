@@ -264,4 +264,15 @@ CREATE TABLE sync_states (
     heartbeat_at TIMESTAMP WITH TIME ZONE
 );
 
+CREATE TABLE tray_entities (
+    id SERIAL PRIMARY KEY,
+    resource VARCHAR(80) NOT NULL,
+    source_id VARCHAR(120) NOT NULL,
+    payload JSON NOT NULL,
+    source_updated_at TIMESTAMP WITH TIME ZONE,
+    synced_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    CONSTRAINT uq_tray_entities_resource_source UNIQUE (resource, source_id)
+);
+CREATE INDEX ix_tray_entities_resource ON tray_entities (resource);
+
 COMMIT;

@@ -13,7 +13,8 @@ navegação do dashboard.
 - vendedores, filtros globais e exportação;
 - trilha de sincronizações, auditoria de qualidade e autenticação;
 - sincronização incremental de pedidos e clientes;
-- carga paginada de produtos, categorias e usuários;
+- carga paginada de produtos, variantes, propriedades, categorias, marcas,
+  clientes, endereços, usuários, kits, cupons e centros de distribuição;
 - detalhes completos de cada pedido, incluindo todos os itens.
 
 ## Execução local

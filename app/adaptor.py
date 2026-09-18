@@ -216,6 +216,11 @@ def _category(row: dict) -> dict:
     }
 
 
+def _raw_entity(row: dict) -> dict:
+    """Preserve every normalized field exposed by TRAYadaptor."""
+    return dict(row)
+
+
 def _order_header(row: dict) -> dict:
     return {
         "id": row.get("id"),
@@ -274,6 +279,17 @@ RESOURCE_MAP = {
     "users": ("/internal/users", "users", _user),
     "categories": ("/internal/categories", "categories", _category),
     "orders": ("/internal/orders", "orders", _order_header),
+    "product-properties": ("/internal/products/properties", "properties", _raw_entity),
+    "variants": ("/internal/products/variants", "variants", _raw_entity),
+    "brands": ("/internal/brands", "brands", _raw_entity),
+    "kits": ("/internal/kits", "kits", _raw_entity),
+    "customer-addresses": ("/internal/customer-addresses", "addresses", _raw_entity),
+    "coupons": ("/internal/coupons", "coupons", _raw_entity),
+    "distribution-centers": (
+        "/internal/inventory/distribution-centers",
+        "distribution_centers",
+        _raw_entity,
+    ),
 }
 
 

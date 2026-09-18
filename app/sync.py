@@ -27,6 +27,7 @@ from app.models import (
     Seller,
     SyncRun,
     SyncState,
+    TrayEntity,
 )
 
 log = logging.getLogger("uvicorn.error")
@@ -49,8 +50,31 @@ DIMENSION_MODELS = {
     "carriers": Carrier,
     "commercial-policies": CommercialPolicy,
 }
-CATALOG_RESOURCES = ("categories", "customers", "products", "users")
-OPTIONAL_CATALOG_RESOURCES = {"categories", "users"}
+CATALOG_RESOURCES = (
+    "categories",
+    "brands",
+    "product-properties",
+    "products",
+    "variants",
+    "customers",
+    "customer-addresses",
+    "users",
+    "kits",
+    "coupons",
+    "distribution-centers",
+)
+OPTIONAL_CATALOG_RESOURCES = {
+    "categories",
+    "brands",
+    "product-properties",
+    "variants",
+    "customer-addresses",
+    "users",
+    "kits",
+    "coupons",
+    "distribution-centers",
+}
+RAW_ENTITY_RESOURCES = OPTIONAL_CATALOG_RESOURCES - {"categories", "users"}
 SYNC_RESOURCES = (*CATALOG_RESOURCES, "orders")
 
 
@@ -438,6 +462,22 @@ def _upsert_rows(db, resource: str, rows: list):
             obj.price = f(row.get("preco"))
             obj.source_updated_at = dt(row.get("ultima_alteracao"))
             obj.raw = row
+            db.add(obj)
+            persisted += 1
+        elif resource in RAW_ENTITY_RESOURCES:
+            obj = db.scalar(
+                select(TrayEntity).where(
+                    TrayEntity.resource == resource,
+                    TrayEntity.source_id == mid,
+                )
+            ) or TrayEntity(resource=resource, source_id=mid)
+            obj.payload = row
+            obj.source_updated_at = dt(
+                row.get("modified")
+                or row.get("updated")
+                or row.get("updated_at")
+            )
+            obj.synced_at = datetime.now(timezone.utc)
             db.add(obj)
             persisted += 1
     return {"persisted": persisted, "itemsPersisted": items_persisted}
