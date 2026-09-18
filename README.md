@@ -43,7 +43,7 @@ de `TRAY_ADAPTER_TOKEN` configurado no serviço TrayAdaptor.
 Depois de subir o backend e aplicar as migrações:
 
 ```bash
-curl -X POST "https://SEU-BACKEND/api/v1/sync/all?full=true"
+curl -X POST "https://SEU-BACKEND/api/v1/sync/all"
 ```
 
 Durante a carga, acompanhe `/api/v1/sync/status`. A Tray limita o volume de

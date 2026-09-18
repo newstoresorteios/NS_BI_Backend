@@ -163,6 +163,53 @@ class ExtendedResourceAdaptor:
 
 
 @pytest.mark.asyncio
+async def test_full_flag_is_ignored_and_legacy_product_run_resumes_next_page(
+    sync_db, monkeypatch
+):
+    with sync_db() as db:
+        db.add(
+            SyncState(
+                resource="products",
+                status="interrupted",
+                cursor="2026-09-17T12:00:00-03:00",
+            )
+        )
+        db.add(
+            SyncRun(
+                resource="products",
+                mode="full",
+                status="interrupted",
+                started_at=datetime.now(timezone.utc),
+                pages=86,
+                received=4300,
+                persisted=4300,
+                failed=0,
+                cursor_after="2026-09-17T12:00:00-03:00",
+                details={},
+            )
+        )
+        db.commit()
+
+    seen: list[str | None] = []
+
+    class ResumeAdaptor:
+        async def list(self, resource: str, cursor: str | None):
+            seen.append(cursor)
+            return {"data": [], "nextCursor": None, "pageCursor": cursor}
+
+    monkeypatch.setattr(sync, "adaptor", ResumeAdaptor())
+
+    result = await sync.sync_resource("products", full=True)
+
+    assert result["status"] == "success"
+    assert seen == ["tray-page:87:|2026-09-17T12:00:00-03:00"]
+    with sync_db() as db:
+        latest = db.scalar(select(SyncRun).order_by(SyncRun.id.desc()))
+        assert latest.mode == "incremental"
+        assert latest.cursor_before == seen[0]
+
+
+@pytest.mark.asyncio
 async def test_extended_resource_is_preserved_idempotently(sync_db, monkeypatch):
     monkeypatch.setattr(sync, "adaptor", ExtendedResourceAdaptor())
 

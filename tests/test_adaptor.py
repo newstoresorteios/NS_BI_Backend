@@ -50,6 +50,7 @@ async def test_list_translates_tray_products_and_pagination(monkeypatch):
     assert result["data"][0]["codigo"] == "NS-10"
     assert result["data"][0]["preco_tabela"] == 299.9
     assert result["nextCursor"].startswith("tray-page:2:")
+    assert result["checkpointCursor"].startswith("tray-page:2:")
     assert client._headers() == {"Authorization": "Bearer internal-token"}
 
 

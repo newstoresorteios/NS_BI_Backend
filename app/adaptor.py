@@ -497,6 +497,12 @@ class Adaptor:
                 if has_next
                 else None
             ),
+            # Durable resume point even on the final page. Catalog resources do
+            # not expose a universal changed-since filter in Tray, so their
+            # incremental checkpoint is the next source page.
+            "checkpointCursor": _encode_cursor(
+                current_page + 1, base_since, current_watermark
+            ),
             "pageCursor": current_watermark,
         }
 

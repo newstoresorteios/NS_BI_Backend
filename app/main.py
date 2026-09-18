@@ -403,11 +403,22 @@ async def run_sync(resource: str, background_tasks: BackgroundTasks, full: bool 
         raise HTTPException(404, "Recurso inválido")
 
     with SessionLocal() as db:
-        running = any(x.status == "running" for x in db.scalars(select(SyncState)))
+        running_resources = [
+            x.resource
+            for x in db.scalars(select(SyncState))
+            if x.status == "running"
+        ]
+        running = bool(running_resources)
     if _sync_busy or running:
         return JSONResponse(
             status_code=202,
-            content={"status": "running", "message": "Sync já em andamento", "resource": resource, "full": full},
+            content={
+                "status": "running",
+                "message": "Já existe uma sincronização em andamento",
+                "requestedResource": resource,
+                "activeResource": running_resources[0] if running_resources else None,
+                "full": False,
+            },
         )
 
     _sync_busy = True
@@ -417,9 +428,9 @@ async def run_sync(resource: str, background_tasks: BackgroundTasks, full: bool 
         global _sync_busy
         try:
             if resource == "all":
-                await sync_all(full, raise_http=False)
+                await sync_all(False, raise_http=False)
             else:
-                await sync_resource(resource, full, raise_http=False)
+                await sync_resource(resource, False, raise_http=False)
         finally:
             _sync_busy = False
             clear_cancel()
@@ -431,6 +442,7 @@ async def run_sync(resource: str, background_tasks: BackgroundTasks, full: bool 
             "status": "started",
             "message": "Sync iniciada em background. Acompanhe em /api/v1/sync/status",
             "resource": resource,
-            "full": full,
+            "full": False,
+            "mode": "incremental",
         },
     )

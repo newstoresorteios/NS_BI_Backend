@@ -9,7 +9,7 @@
    usados pelo NSAgent.
 5. Configure login, CORS e segredos do BI.
 6. Publique o frontend somente com `VITE_BI_API_URL`.
-7. Execute `POST /api/v1/sync/all?full=true` uma única vez.
+7. Execute `POST /api/v1/sync/all`. A primeira execução importa o histórico disponível e as seguintes continuam pelo cursor salvo.
 8. Confira `/api/v1/sync/status` e `/api/v1/data-quality`.
 
 ## Backend

@@ -77,7 +77,8 @@ OPTIONAL_CATALOG_RESOURCES = {
     "shipping-methods",
 }
 RAW_ENTITY_RESOURCES = OPTIONAL_CATALOG_RESOURCES - {"categories", "users"}
-SYNC_RESOURCES = (*CATALOG_RESOURCES, "orders")
+# Keep financial data fresh before starting the slower catalog resources.
+SYNC_RESOURCES = ("orders", *CATALOG_RESOURCES)
 
 
 class OrderDetailBatchError(Exception):
@@ -617,6 +618,35 @@ def _claim_sync(resource: str, full: bool, started_at: datetime):
 
         token = str(uuid4())
         cursor_before = state.cursor
+        # Older releases saved either the source watermark or the last page
+        # read, instead of the next page. Recover the checkpoint from the audit
+        # history so 4,300 products resume at page 87 and completed dimensions
+        # do not reload their last page.
+        if not full and resource not in {"orders", "customers"}:
+            legacy_run = db.scalar(
+                select(SyncRun)
+                .where(
+                    SyncRun.resource == resource,
+                    SyncRun.mode == "full",
+                    SyncRun.status.in_(("success", "interrupted", "partial")),
+                    SyncRun.pages > 0,
+                )
+                .order_by(SyncRun.pages.desc(), SyncRun.id.desc())
+                .limit(1)
+            )
+            current_page = 0
+            if cursor_before and cursor_before.startswith("tray-page:"):
+                try:
+                    current_page = int(cursor_before.split(":", 2)[1])
+                except (ValueError, IndexError):
+                    current_page = 0
+            if legacy_run is not None and current_page <= legacy_run.pages:
+                watermark = cursor_before or legacy_run.cursor_after or ""
+                if watermark.startswith("tray-page:"):
+                    watermark = watermark.split("|", 1)[-1]
+                cursor_before = f"tray-page:{legacy_run.pages + 1}:|{watermark}"
+                state.cursor = cursor_before
+                db.add(state)
         state.status = "running"
         state.error = None
         state.lease_token = token
@@ -748,6 +778,12 @@ def _finish_sync_run(
 
 async def sync_resource(resource: str, full=False, *, raise_http=True):
     # Short DB sessions only — never hold a pooler connection during Tray HTTP waits.
+    # A missing cursor already performs the required initial import. Afterwards
+    # every execution must resume from the committed checkpoint. Old clients may
+    # still send full=true, so enforce incremental mode at this lowest layer.
+    if full:
+        log.info("Ignoring full sync request for %s; incremental mode is mandatory", resource)
+    full = False
     started_at = datetime.now(timezone.utc)
     claim = await asyncio.to_thread(_claim_sync, resource, full, started_at)
     if claim is None:
@@ -784,6 +820,16 @@ async def sync_resource(resource: str, full=False, *, raise_http=True):
                     raise
             next_cursor = result.get("nextCursor")
             page_cursor = result.get("pageCursor") or next_cursor or cursor
+            checkpoint_cursor = (
+                next_cursor
+                or (
+                    page_cursor
+                    if resource in {"orders", "customers"}
+                    else result.get("checkpointCursor")
+                )
+                or page_cursor
+                or committed_cursor
+            )
             next_pages = pages + 1
             next_persisted, next_items_persisted = await asyncio.to_thread(
                 _persist_sync_page,
@@ -791,7 +837,9 @@ async def sync_resource(resource: str, full=False, *, raise_http=True):
                 lease_token,
                 resource,
                 rows,
-                page_cursor=page_cursor or committed_cursor,
+                # While more pages exist the checkpoint must be the next page,
+                # not merely the last modification timestamp.
+                page_cursor=checkpoint_cursor,
                 next_pages=next_pages,
                 received=received,
                 persisted=persisted,
@@ -802,7 +850,7 @@ async def sync_resource(resource: str, full=False, *, raise_http=True):
             pages = next_pages
             persisted = next_persisted
             items_persisted = next_items_persisted
-            committed_cursor = page_cursor or committed_cursor
+            committed_cursor = checkpoint_cursor
             if not next_cursor or next_cursor == cursor:
                 break
             cursor = next_cursor
