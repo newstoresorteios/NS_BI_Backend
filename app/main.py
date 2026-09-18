@@ -34,6 +34,7 @@ from app.adaptor import clear_cancel, keep_adaptor_warm, request_cancel
 from app.sync import (
     SYNC_LEASE_TTL,
     SYNC_RESOURCES,
+    active_sync_resources,
     interrupt_running_syncs,
     sync_all,
     sync_catalog_job,
@@ -319,6 +320,7 @@ def sellers(db: Session = Depends(db_session)):
 
 @app.get("/api/v1/sync/status")
 def sync_status(db: Session = Depends(db_session)):
+    active_sync_resources()
     return [
         {
             "resource": x.resource,
@@ -402,13 +404,8 @@ async def run_sync(resource: str, background_tasks: BackgroundTasks, full: bool 
     if resource != "all" and resource not in SYNC_RESOURCES:
         raise HTTPException(404, "Recurso inválido")
 
-    with SessionLocal() as db:
-        running_resources = [
-            x.resource
-            for x in db.scalars(select(SyncState))
-            if x.status == "running"
-        ]
-        running = bool(running_resources)
+    running_resources = await asyncio.to_thread(active_sync_resources)
+    running = bool(running_resources)
     if _sync_busy or running:
         return JSONResponse(
             status_code=202,

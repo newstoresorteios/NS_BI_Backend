@@ -35,6 +35,7 @@ MAX_RETRY_WAIT = 180.0
 DEFAULT_429_WAIT = 20.0
 RATE_LIMIT_BUDGET = 240.0
 PAGE_SIZE = 50
+ORDER_PAGE_SIZE = 10
 
 _request_lock = asyncio.Lock()
 _not_before = 0.0
@@ -470,7 +471,8 @@ class Adaptor:
             raise HTTPException(404, f"Recurso Tray não suportado: {resource}")
         path, key, normalizer = RESOURCE_MAP[resource]
         page, base_since, accumulated_watermark = _decode_cursor(cursor)
-        params: dict[str, object] = {"page": page, "limit": PAGE_SIZE}
+        page_size = ORDER_PAGE_SIZE if resource == "orders" else PAGE_SIZE
+        params: dict[str, object] = {"page": page, "limit": page_size}
         if base_since and resource in {"orders", "customers"}:
             params["lastModifiedStart"] = base_since
         payload = await self._get(path, params=params, retries=retries)
@@ -486,7 +488,7 @@ class Adaptor:
         ]
         paging = payload.get("paging") if isinstance(payload.get("paging"), dict) else {}
         total = int(paging.get("total") or len(rows))
-        limit = int(paging.get("limit") or PAGE_SIZE)
+        limit = int(paging.get("limit") or page_size)
         current_page = int(paging.get("page") or page)
         current_watermark = _watermark(source_rows, accumulated_watermark)
         has_next = current_page * limit < total and bool(rows)

@@ -508,6 +508,54 @@ async def test_claim_blocks_other_resources_while_one_is_running(sync_db, monkey
     assert result["status"] == "running"
 
 
+def test_active_sync_resources_releases_orphaned_lease(sync_db):
+    started_at = datetime.now(timezone.utc) - sync.SYNC_LEASE_TTL * 2
+    with sync_db() as db:
+        db.add(
+            SyncState(
+                resource="orders",
+                status="running",
+                lease_token="orphaned-token",
+                heartbeat_at=started_at,
+            )
+        )
+        db.add(
+            SyncRun(
+                resource="orders",
+                mode="incremental",
+                status="running",
+                started_at=started_at,
+                details={},
+            )
+        )
+        db.commit()
+
+    assert sync.active_sync_resources() == []
+
+    with sync_db() as db:
+        state = db.get(SyncState, "orders")
+        run = db.scalar(select(SyncRun))
+        assert state.status == "interrupted"
+        assert state.lease_token is None
+        assert run.status == "interrupted"
+        assert run.finished_at is not None
+
+
+def test_active_sync_resources_preserves_fresh_lease(sync_db):
+    with sync_db() as db:
+        db.add(
+            SyncState(
+                resource="orders",
+                status="running",
+                lease_token="live-token",
+                heartbeat_at=datetime.now(timezone.utc),
+            )
+        )
+        db.commit()
+
+    assert sync.active_sync_resources() == ["orders"]
+
+
 @pytest.mark.asyncio
 async def test_sync_all_continues_after_rate_limit(sync_db, monkeypatch):
     called: list[str] = []

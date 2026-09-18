@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from contextlib import suppress
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from uuid import uuid4
@@ -38,7 +39,8 @@ RESOURCE_PAUSE_SECONDS = 5
 RATE_LIMIT_PAUSE_SECONDS = 180
 MISSING_DETAIL_BATCH = 5
 MISSING_DETAIL_MAX_BATCHES = 20
-SYNC_LEASE_TTL = timedelta(minutes=15)
+SYNC_LEASE_TTL = timedelta(minutes=2)
+SYNC_HEARTBEAT_SECONDS = 20
 SYNC_COORDINATION_LOCK = "ns_bi_sync_tray"
 _order_detail_blocked = False
 DIMENSION_MODELS = {
@@ -573,6 +575,72 @@ def interrupt_running_syncs(reason: str = "Sincronização interrompida") -> int
         return len(states)
 
 
+def active_sync_resources(
+    stale_reason: str = "Lease de sincronização expirou",
+) -> list[str]:
+    """Return live leases and release orphaned runs atomically."""
+    now = datetime.now(timezone.utc)
+    active: list[str] = []
+    with SessionLocal() as db:
+        _acquire_sync_coordination_lock(db)
+        states = list(
+            db.scalars(
+                select(SyncState)
+                .where(SyncState.status == "running")
+                .order_by(SyncState.resource)
+                .with_for_update()
+            )
+        )
+        for state in states:
+            if _lease_is_active(state, now):
+                active.append(state.resource)
+                continue
+            state.status = "interrupted"
+            state.error = stale_reason
+            state.lease_token = None
+            db.add(state)
+            runs = db.scalars(
+                select(SyncRun).where(
+                    SyncRun.resource == state.resource,
+                    SyncRun.status == "running",
+                )
+            ).all()
+            for run in runs:
+                run.status = "interrupted"
+                run.finished_at = now
+                run.error = stale_reason
+                db.add(run)
+        db.commit()
+    return active
+
+
+def _refresh_sync_heartbeat(resource: str, lease_token: str) -> bool:
+    with SessionLocal() as db:
+        state = db.get(SyncState, resource)
+        if (
+            state is None
+            or state.status != "running"
+            or state.lease_token != lease_token
+        ):
+            return False
+        state.heartbeat_at = datetime.now(timezone.utc)
+        db.add(state)
+        db.commit()
+        return True
+
+
+async def _keep_sync_lease_alive(resource: str, lease_token: str) -> None:
+    while True:
+        await asyncio.sleep(SYNC_HEARTBEAT_SECONDS)
+        alive = await asyncio.to_thread(
+            _refresh_sync_heartbeat,
+            resource,
+            lease_token,
+        )
+        if not alive:
+            return
+
+
 def _claim_sync(resource: str, full: bool, started_at: datetime):
     """Atomically claim a resource across workers and service instances."""
     now = datetime.now(timezone.utc)
@@ -794,6 +862,9 @@ async def sync_resource(resource: str, full=False, *, raise_http=True):
         }
     run_id, lease_token, cursor_before = claim
     cursor = None if full else cursor_before
+    heartbeat_task = asyncio.create_task(
+        _keep_sync_lease_alive(resource, lease_token)
+    )
 
     pages = 0
     received = 0
@@ -977,6 +1048,10 @@ async def sync_resource(resource: str, full=False, *, raise_http=True):
                 else None
             ),
         }
+    finally:
+        heartbeat_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await heartbeat_task
 
 
 def _operator_cancelled(result: dict) -> bool:

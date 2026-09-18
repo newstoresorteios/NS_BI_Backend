@@ -55,6 +55,24 @@ async def test_list_translates_tray_products_and_pagination(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_orders_use_small_pages_for_frequent_checkpoints(monkeypatch):
+    async def fake_get(self, path, *, params=None, retries=8):
+        assert path == "/internal/orders"
+        assert params == {"page": 1, "limit": 10}
+        return {
+            "paging": {"total": 0, "page": 1, "limit": 10},
+            "orders": [],
+        }
+
+    monkeypatch.setattr(Adaptor, "_get", fake_get)
+
+    result = await Adaptor().list("orders")
+
+    assert result["data"] == []
+    assert result["nextCursor"] is None
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("resource", "path", "key"),
     [
