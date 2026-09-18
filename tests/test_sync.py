@@ -13,6 +13,7 @@ from sqlalchemy.pool import StaticPool
 from app.database import Base
 from app.models import (
     Category,
+    Customer,
     Order,
     OrderItem,
     Product,
@@ -160,6 +161,99 @@ class ExtendedResourceAdaptor:
             "pageCursor": "2026-09-17T12:00:00-03:00",
             "nextCursor": None,
         }
+
+
+class CustomerContactAdaptor:
+    async def list(self, resource: str, cursor: str | None):
+        if resource == "customers":
+            return {
+                "data": [
+                    {
+                        "id": "customer-1",
+                        "nome": "Cliente Completo",
+                        "razao_social": "Cliente Completo Ltda",
+                        "cpf": "12345678900",
+                        "rg": "1234567",
+                        "emails": [{"email": "lead@example.com"}],
+                        "celular": "11999999999",
+                        "telefone": "1133334444",
+                        "endereco": "Rua Principal",
+                        "numero": "10",
+                        "cidade": "Sao Paulo",
+                        "estado": "SP",
+                        "cep": "01001000",
+                        "newsletter": "1",
+                        "observacao": "Contato comercial",
+                        "tray": {
+                            "id": "customer-1",
+                            "email": "lead@example.com",
+                            "cellphone": "11999999999",
+                            "credit_limit": "5000.00",
+                        },
+                    }
+                ],
+                "nextCursor": None,
+            }
+        assert resource == "customer-addresses"
+        return {
+            "data": [
+                {
+                    "id": "address-1",
+                    "customer_id": "customer-1",
+                    "recipient": "Cliente Completo",
+                    "address": "Rua Entrega",
+                    "number": "20",
+                    "city": "Sao Paulo",
+                    "state": "SP",
+                    "zip_code": "02002000",
+                }
+            ],
+            "nextCursor": None,
+        }
+
+
+@pytest.mark.asyncio
+async def test_customer_sync_stores_complete_contacts_and_links_addresses(
+    sync_db, monkeypatch
+):
+    monkeypatch.setattr(sync, "adaptor", CustomerContactAdaptor())
+
+    assert (await sync.sync_resource("customers"))["status"] == "success"
+    assert (await sync.sync_resource("customer-addresses"))["status"] == "success"
+
+    with sync_db() as db:
+        customer = db.scalar(select(Customer))
+        assert customer.email == "lead@example.com"
+        assert customer.phone == "11999999999"
+        assert [item["numero"] for item in customer.phones] == [
+            "11999999999",
+            "1133334444",
+        ]
+        assert customer.emails == [
+            {"email": "lead@example.com", "principal": True}
+        ]
+        assert customer.contact_profile["observation"] == "Contato comercial"
+        assert any(item.get("id") == "address-1" for item in customer.addresses)
+        assert customer.raw["tray"]["credit_limit"] == "5000.00"
+        assert any(
+            item.get("customer_id") == "customer-1"
+            for item in customer.raw["customer_addresses"]
+        )
+
+
+@pytest.mark.asyncio
+async def test_orders_job_syncs_customer_contacts_before_orders(monkeypatch):
+    seen: list[tuple[tuple[str, ...], bool]] = []
+
+    async def fake_sequence(resources: tuple[str, ...], full: bool):
+        seen.append((resources, full))
+        return []
+
+    monkeypatch.setattr(sync, "_run_resource_sequence", fake_sequence)
+
+    await sync.sync_orders_job()
+
+    assert seen == [(sync.ORDER_SYNC_RESOURCES, False)]
 
 
 @pytest.mark.asyncio

@@ -426,6 +426,8 @@ async def run_sync(resource: str, background_tasks: BackgroundTasks, full: bool 
         try:
             if resource == "all":
                 await sync_all(False, raise_http=False)
+            elif resource == "orders":
+                await sync_orders_job()
             else:
                 await sync_resource(resource, False, raise_http=False)
         finally:

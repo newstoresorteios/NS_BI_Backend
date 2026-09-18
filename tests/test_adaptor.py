@@ -91,6 +91,41 @@ async def test_orders_migrate_ascending_cursor_to_newest_first(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_customer_preserves_complete_registration(monkeypatch):
+    async def fake_get(self, path, *, params=None, retries=8):
+        assert path == "/internal/customers"
+        return {
+            "paging": {"total": 1, "page": 1, "limit": 50},
+            "customers": [
+                {
+                    "id": "customer-1",
+                    "name": "Pessoa Cliente",
+                    "email": "lead@example.com",
+                    "phone": "1133334444",
+                    "cellphone": "11999999999",
+                    "rg": "1234567",
+                    "birth_date": "1990-01-01",
+                    "observation": "Lead prioritario",
+                    "credit_limit": "2500.00",
+                    "addresses": [{"id": "address-1", "city": "Sao Paulo"}],
+                }
+            ],
+        }
+
+    monkeypatch.setattr(Adaptor, "_get", fake_get)
+
+    customer = (await Adaptor().list("customers"))["data"][0]
+
+    assert customer["emails"][0]["email"] == "lead@example.com"
+    assert customer["telefone"] == "1133334444"
+    assert customer["celular"] == "11999999999"
+    assert customer["rg"] == "1234567"
+    assert customer["observacao"] == "Lead prioritario"
+    assert customer["enderecos"][0]["id"] == "address-1"
+    assert customer["tray"]["credit_limit"] == "2500.00"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("resource", "path", "key"),
     [

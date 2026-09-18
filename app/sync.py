@@ -81,6 +81,7 @@ OPTIONAL_CATALOG_RESOURCES = {
 RAW_ENTITY_RESOURCES = OPTIONAL_CATALOG_RESOURCES - {"categories", "users"}
 # Keep financial data fresh before starting the slower catalog resources.
 SYNC_RESOURCES = ("orders", *CATALOG_RESOURCES)
+ORDER_SYNC_RESOURCES = ("customers", "customer-addresses", "orders")
 
 
 class OrderDetailBatchError(Exception):
@@ -130,6 +131,70 @@ def optional_decimal(row: dict, *keys: str) -> Decimal | None:
         if row.get(key) is not None and row.get(key) != "":
             return f(row[key])
     return None
+
+
+def _customer_emails(row: dict) -> list[dict]:
+    values: list[dict] = []
+    seen: set[str] = set()
+    candidates = row.get("emails") if isinstance(row.get("emails"), list) else []
+    tray = row.get("tray") if isinstance(row.get("tray"), dict) else {}
+    for candidate in [*candidates, tray.get("email")]:
+        value = candidate.get("email") if isinstance(candidate, dict) else candidate
+        email = str(value or "").strip()
+        key = email.lower()
+        if not email or key in seen:
+            continue
+        seen.add(key)
+        values.append({"email": email, "principal": len(values) == 0})
+    return values
+
+
+def _customer_phones(row: dict) -> list[dict]:
+    values: list[dict] = []
+    seen: set[str] = set()
+    tray = row.get("tray") if isinstance(row.get("tray"), dict) else {}
+    for kind, value in (
+        ("celular", row.get("celular") or tray.get("cellphone")),
+        ("telefone", row.get("telefone") or tray.get("phone")),
+    ):
+        phone = str(value or "").strip()
+        key = "".join(character for character in phone if character.isdigit()) or phone
+        if not phone or key in seen:
+            continue
+        seen.add(key)
+        values.append({"tipo": kind, "numero": phone, "principal": len(values) == 0})
+    return values
+
+
+def _customer_addresses(row: dict) -> list[dict]:
+    addresses = row.get("enderecos") or row.get("addresses")
+    if not isinstance(addresses, list):
+        addresses = []
+    result = [dict(value) for value in addresses if isinstance(value, dict)]
+    primary = {
+        "address": row.get("endereco"),
+        "number": row.get("numero"),
+        "complement": row.get("complemento"),
+        "neighborhood": row.get("bairro"),
+        "city": row.get("cidade"),
+        "state": row.get("estado"),
+        "zip_code": row.get("cep"),
+        "primary": True,
+    }
+    if any(value not in (None, "") for key, value in primary.items() if key != "primary"):
+        result.insert(0, primary)
+    return result
+
+
+def _merge_customer_address(existing: list | None, address: dict) -> list[dict]:
+    values = [dict(value) for value in (existing or []) if isinstance(value, dict)]
+    address_id = str(address.get("id") or "")
+    if address_id:
+        values = [value for value in values if str(value.get("id") or "") != address_id]
+    elif address in values:
+        return values
+    values.append(dict(address))
+    return values
 
 
 def _order_line_items(row: dict) -> list | None:
@@ -242,10 +307,22 @@ def _upsert_rows(db, resource: str, rows: list):
             obj.document = row.get("cnpj") or row.get("cpf")
             obj.city = row.get("cidade")
             obj.state = row.get("estado")
-            emails = row.get("emails") or [{}]
-            first = emails[0] if emails else {}
-            obj.email = first.get("email") if isinstance(first, dict) else None
-            obj.phone = row.get("celular") or row.get("telefone")
+            emails = _customer_emails(row)
+            phones = _customer_phones(row)
+            obj.emails = emails
+            obj.phones = phones
+            obj.addresses = _customer_addresses(row)
+            obj.email = emails[0]["email"] if emails else None
+            obj.phone = phones[0]["numero"] if phones else None
+            obj.contact_profile = {
+                "birthDate": row.get("data_nascimento"),
+                "gender": row.get("genero"),
+                "newsletter": row.get("newsletter"),
+                "observation": row.get("observacao"),
+                "lastPurchase": row.get("ultima_compra"),
+                "lastVisit": row.get("ultima_visita"),
+                "totalOrders": row.get("total_pedidos"),
+            }
             if "segmento_id" in row:
                 obj.segment_mercos_id = str(row.get("segmento_id") or "") or None
             if "data_criacao" in row:
@@ -517,6 +594,21 @@ def _upsert_rows(db, resource: str, rows: list):
             )
             obj.synced_at = datetime.now(timezone.utc)
             db.add(obj)
+            if resource == "customer-addresses":
+                customer_id = str(row.get("customer_id") or "")
+                customer = (
+                    db.scalar(select(Customer).where(Customer.mercos_id == customer_id))
+                    if customer_id
+                    else None
+                )
+                if customer is not None:
+                    customer.addresses = _merge_customer_address(customer.addresses, row)
+                    customer.city = customer.city or row.get("city")
+                    customer.state = customer.state or row.get("state")
+                    raw = dict(customer.raw or {})
+                    raw["customer_addresses"] = customer.addresses
+                    customer.raw = raw
+                    db.add(customer)
             persisted += 1
     return {"persisted": persisted, "itemsPersisted": items_persisted}
 
@@ -1106,7 +1198,7 @@ async def sync_all(full=False, *, raise_http=True):
 
 
 async def sync_orders_job():
-    await sync_resource("orders", full=False, raise_http=False)
+    await _run_resource_sequence(ORDER_SYNC_RESOURCES, False)
 
 
 async def sync_catalog_job():
