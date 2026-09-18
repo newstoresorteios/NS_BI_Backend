@@ -1,0 +1,177 @@
+from collections import defaultdict, deque
+from datetime import datetime, timedelta, timezone
+import secrets
+from typing import Literal
+from uuid import uuid4
+
+from fastapi import Cookie, Depends, Header, HTTPException, Request, Response
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import JWTError, jwt
+from pydantic import BaseModel
+
+from app.config import settings
+
+
+Role = Literal["admin", "viewer"]
+ALGORITHM = "HS256"
+bearer = HTTPBearer(auto_error=False)
+login_attempts: defaultdict[str, deque[datetime]] = defaultdict(deque)
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class AuthUser(BaseModel):
+    username: str
+    role: Role
+
+
+class AuthResponse(BaseModel):
+    accessToken: str
+    tokenType: str = "bearer"
+    expiresIn: int
+    user: AuthUser
+
+
+def _digest_equal(left: str, right: str) -> bool:
+    if len(left) != len(right):
+        return False
+    return secrets.compare_digest(left, right)
+
+
+def _credentials(username: str, password: str) -> AuthUser | None:
+    config = settings()
+    given_user = (username or "").strip().casefold()
+    given_password = password or ""
+    candidates = (
+        (
+            config.auth_admin_username,
+            config.auth_admin_password,
+            "admin",
+        ),
+        (
+            config.auth_viewer_username,
+            config.auth_viewer_password,
+            "viewer",
+        ),
+    )
+    for expected_user, expected_password, role in candidates:
+        if not expected_password:
+            continue
+        if _digest_equal(given_user, expected_user.strip().casefold()) and _digest_equal(
+            given_password, expected_password
+        ):
+            return AuthUser(username=expected_user, role=role)
+    return None
+
+
+def check_login_rate_limit(request: Request) -> None:
+    key = request.client.host if request.client else "unknown"
+    now = datetime.now(timezone.utc)
+    window = now - timedelta(minutes=1)
+    attempts = login_attempts[key]
+    while attempts and attempts[0] < window:
+        attempts.popleft()
+    if len(attempts) >= 10:
+        raise HTTPException(429, "Muitas tentativas. Aguarde um minuto.")
+    attempts.append(now)
+
+
+def _token(user: AuthUser, token_type: str, lifetime: timedelta) -> str:
+    now = datetime.now(timezone.utc)
+    return jwt.encode(
+        {
+            "sub": user.username,
+            "role": user.role,
+            "type": token_type,
+            "iat": now,
+            "exp": now + lifetime,
+            "jti": uuid4().hex,
+        },
+        settings().jwt_secret,
+        algorithm=ALGORITHM,
+    )
+
+
+def issue_tokens(user: AuthUser, response: Response) -> AuthResponse:
+    config = settings()
+    access_seconds = config.auth_access_minutes * 60
+    access = _token(
+        user,
+        "access",
+        timedelta(seconds=access_seconds),
+    )
+    refresh = _token(
+        user,
+        "refresh",
+        timedelta(days=config.auth_refresh_days),
+    )
+    response.set_cookie(
+        "bi_refresh",
+        refresh,
+        max_age=config.auth_refresh_days * 86400,
+        httponly=True,
+        secure=config.auth_cookie_secure,
+        samesite=config.auth_cookie_samesite,
+        path="/api/v1/auth",
+    )
+    return AuthResponse(
+        accessToken=access,
+        expiresIn=access_seconds,
+        user=user,
+    )
+
+
+def authenticate(payload: LoginRequest) -> AuthUser:
+    user = _credentials(payload.username, payload.password)
+    if user is None:
+        raise HTTPException(401, "Usuário ou senha inválidos")
+    return user
+
+
+def decode_token(token: str, expected_type: str) -> AuthUser:
+    try:
+        payload = jwt.decode(
+            token,
+            settings().jwt_secret,
+            algorithms=[ALGORITHM],
+        )
+    except JWTError as exc:
+        raise HTTPException(401, "Sessão inválida ou expirada") from exc
+    if payload.get("type") != expected_type:
+        raise HTTPException(401, "Tipo de token inválido")
+    username = payload.get("sub")
+    role = payload.get("role")
+    if not username or role not in {"admin", "viewer"}:
+        raise HTTPException(401, "Token sem identidade válida")
+    return AuthUser(username=username, role=role)
+
+
+def current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
+    x_api_key: str | None = Header(None),
+) -> AuthUser:
+    expected_key = settings().bi_api_key
+    if x_api_key and expected_key and _digest_equal(x_api_key, expected_key):
+        return AuthUser(username="service", role="admin")
+    if credentials and credentials.credentials:
+        return decode_token(credentials.credentials, "access")
+    raise HTTPException(401, "Não autenticado")
+
+
+def require_admin(user: AuthUser = Depends(current_user)) -> AuthUser:
+    if user.role != "admin":
+        raise HTTPException(403, "Acesso exclusivo para administradores")
+    return user
+
+
+def refresh_user(bi_refresh: str | None = Cookie(None)) -> AuthUser:
+    if not bi_refresh:
+        raise HTTPException(401, "Sessão expirada")
+    return decode_token(bi_refresh, "refresh")
+
+
+def clear_refresh_cookie(response: Response) -> None:
+    response.delete_cookie("bi_refresh", path="/api/v1/auth")

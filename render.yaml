@@ -1,0 +1,40 @@
+services:
+  - type: web
+    name: ns-bi-backend
+    runtime: docker
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: TRAY_ADAPTOR_URL
+        value: "https://trayadaptor.onrender.com"
+      - key: TRAY_ADAPTOR_TOKEN
+        sync: false
+      - key: BI_API_KEY
+        generateValue: true
+      - key: JWT_SECRET
+        generateValue: true
+      - key: AUTH_ADMIN_USERNAME
+        value: "admin@newstore.com.br"
+      - key: AUTH_ADMIN_PASSWORD
+        sync: false
+      - key: AUTH_VIEWER_USERNAME
+        value: "viewer"
+      - key: AUTH_VIEWER_PASSWORD
+        sync: false
+      - key: AUTH_COOKIE_SECURE
+        value: "true"
+      - key: CORS_ORIGINS
+        value: "http://localhost:5173,https://ns-bi-frontend.vercel.app"
+      - key: SYNC_ORDERS_MINUTES
+        value: "10"
+      - key: SYNC_CATALOG_HOURS
+        value: "6"
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: "gpt-4o-mini"
+      - key: RETAIL_CONCURRENCY
+        value: "2"
+      - key: RETAIL_OPENAI_MAX_INFLIGHT
+        value: "4"

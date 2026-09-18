@@ -1,0 +1,339 @@
+from __future__ import annotations
+
+from collections import Counter, defaultdict
+from datetime import datetime, timezone
+from typing import Any
+
+from sqlalchemy import String, cast, exists, func, or_, select, text
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import Session
+
+from app.domain.order_status import RECOGNIZED_ORDER_STATUSES, status_sql_in
+from app.models import Customer, Order, OrderItem, Product, Seller, SyncState
+from app.services.analytics_filters import data_through_timestamp
+
+
+RAW_MODELS = {
+    "customers": Customer,
+    "products": Product,
+    "sellers": Seller,
+    "orders": Order,
+    "orderItems": OrderItem,
+}
+SENSITIVE_RAW_KEYS = {
+    "token",
+    "applicationtoken",
+    "companytoken",
+    "password",
+    "secret",
+    "apikey",
+    "api_key",
+}
+
+
+def _scalar_int(db: Session, statement) -> int:
+    try:
+        return int(db.scalar(statement) or 0)
+    except OperationalError:
+        db.rollback()
+        return 0
+
+
+def _estimated_count(db: Session, table_name: str, statement) -> int:
+    bind = db.get_bind()
+    if bind is not None and bind.dialect.name == "postgresql":
+        try:
+            estimate = db.scalar(
+                text(
+                    """
+                    SELECT COALESCE(c.reltuples, 0)::bigint
+                      FROM pg_class c
+                      JOIN pg_namespace n ON n.oid = c.relnamespace
+                     WHERE n.nspname = 'public'
+                       AND c.relname = :table_name
+                       AND c.relkind = 'r'
+                    """
+                ),
+                {"table_name": table_name},
+            )
+            if estimate is not None:
+                return max(int(estimate), 0)
+        except OperationalError:
+            db.rollback()
+    return _scalar_int(db, statement)
+
+
+def _pct(numerator: int, denominator: int) -> float:
+    if denominator <= 0:
+        return 0.0
+    return round((numerator / denominator) * 100, 2)
+
+
+def _duplicate_groups(db: Session, column) -> int:
+    grouped = (
+        select(column.label("value"))
+        .where(column.is_not(None), func.trim(column) != "")
+        .group_by(column)
+        .having(func.count() > 1)
+        .subquery()
+    )
+    return _scalar_int(db, select(func.count()).select_from(grouped))
+
+
+def _empty_raw_count(db: Session, model) -> int:
+    raw_text = func.lower(func.trim(cast(model.raw, String)))
+    return _scalar_int(
+        db,
+        select(func.count(model.id)).where(
+            or_(
+                model.raw.is_(None),
+                raw_text.in_(("", "{}", "null")),
+            )
+        ),
+    )
+
+
+def raw_field_inventory(db: Session, sample_limit: int = 100) -> dict[str, dict[str, Any]]:
+    """Inspect raw payload shape without returning customer values or PII."""
+    inventory: dict[str, dict[str, Any]] = {}
+    safe_limit = max(1, min(sample_limit, 500))
+    for table_name, model in RAW_MODELS.items():
+        field_counts: Counter[str] = Counter()
+        field_types: dict[str, Counter[str]] = defaultdict(Counter)
+        samples = db.scalars(
+            select(model.raw).where(model.raw.is_not(None)).limit(safe_limit)
+        ).all()
+        for raw in samples:
+            if not isinstance(raw, dict):
+                continue
+            for key, value in raw.items():
+                normalized_key = key.lower().replace("-", "").replace("_", "")
+                if normalized_key in SENSITIVE_RAW_KEYS:
+                    continue
+                field_counts[key] += 1
+                field_types[key][type(value).__name__] += 1
+        inventory[table_name] = {
+            "sampledRows": len(samples),
+            "fields": {
+                key: {
+                    "occurrences": count,
+                    "types": dict(field_types[key]),
+                }
+                for key, count in sorted(field_counts.items())
+            },
+        }
+    return inventory
+
+
+def _order_total_divergences(db: Session) -> int | None:
+    diverged = (
+        select(OrderItem.order_mercos_id)
+        .join(Order, Order.mercos_id == OrderItem.order_mercos_id)
+        .where(OrderItem.excluded.is_(False))
+        .group_by(OrderItem.order_mercos_id, Order.total)
+        .having(
+            func.abs(
+                func.coalesce(Order.total, 0)
+                - func.coalesce(func.sum(OrderItem.total), 0)
+            )
+            > 0.01
+        )
+        .subquery()
+    )
+    statement = select(func.count()).select_from(diverged)
+    bind = db.get_bind()
+    try:
+        if bind is not None and bind.dialect.name == "postgresql":
+            db.execute(text("SET LOCAL statement_timeout = '2500ms'"))
+        value = int(db.scalar(statement) or 0)
+        if bind is not None and bind.dialect.name == "postgresql":
+            db.execute(text("RESET statement_timeout"))
+        return value
+    except OperationalError:
+        db.rollback()
+        return None
+
+
+def build_data_quality_report(
+    db: Session, *, include_raw_inventory: bool = False, raw_sample_limit: int = 100
+) -> dict[str, Any]:
+    total_customers = _estimated_count(
+        db, "customers", select(func.count(Customer.id))
+    )
+    total_products = _estimated_count(
+        db, "products", select(func.count(Product.id))
+    )
+    total_sellers = _estimated_count(db, "sellers", select(func.count(Seller.id)))
+    total_orders = _estimated_count(db, "orders", select(func.count(Order.id)))
+    total_items = _estimated_count(
+        db, "order_items", select(func.count(OrderItem.id))
+    )
+
+    orders_with_items = _scalar_int(
+        db,
+        select(func.count(Order.id)).where(func.coalesce(Order.item_count, 0) > 0),
+    )
+    orders_with_customer = _scalar_int(
+        db,
+        select(func.count(Order.id)).where(
+            exists(
+                select(Customer.id).where(
+                    Customer.mercos_id == Order.customer_mercos_id
+                )
+            )
+        ),
+    )
+    orders_with_seller = _scalar_int(
+        db,
+        select(func.count(Order.id)).where(
+            exists(
+                select(Seller.id).where(
+                    Seller.mercos_id == Order.seller_mercos_id
+                )
+            )
+        ),
+    )
+    items_with_product = _scalar_int(
+        db,
+        select(func.count(OrderItem.id)).where(
+            OrderItem.excluded.is_(False),
+            exists(
+                select(Product.id).where(
+                    Product.mercos_id == OrderItem.product_mercos_id
+                )
+            )
+        ),
+    )
+    recognized_statuses = _scalar_int(
+        db,
+        select(func.count(Order.id)).where(
+            status_sql_in(Order.status, RECOGNIZED_ORDER_STATUSES)
+        ),
+    )
+
+    order_total_divergences = _order_total_divergences(db)
+
+    min_date, max_date = db.execute(
+        select(func.min(Order.issued_at), func.max(Order.issued_at))
+    ).one()
+
+    sync_rows = list(db.scalars(select(SyncState).order_by(SyncState.resource)))
+    sync = [
+        {
+            "resource": row.resource,
+            "status": row.status,
+            "cursor": row.cursor,
+            "lastSuccessAt": row.last_success_at,
+            "records": int(row.records or 0),
+            "error": row.error,
+        }
+        for row in sync_rows
+    ]
+
+    coverage = {
+        "ordersWithItemsPct": _pct(orders_with_items, total_orders),
+        "ordersWithCustomerPct": _pct(orders_with_customer, total_orders),
+        "ordersWithSellerPct": _pct(orders_with_seller, total_orders),
+        "itemsWithProductPct": _pct(items_with_product, total_items),
+        "recognizedStatusPct": _pct(recognized_statuses, total_orders),
+    }
+    integrity = {
+        "ordersWithoutItems": max(total_orders - orders_with_items, 0),
+        "ordersWithoutCustomer": max(total_orders - orders_with_customer, 0),
+        "ordersWithoutSeller": max(total_orders - orders_with_seller, 0),
+        "itemsWithoutProduct": max(total_items - items_with_product, 0),
+        "orderTotalDivergences": order_total_divergences,
+    }
+    zero_values = {
+        "ordersWithZeroTotal": _scalar_int(
+            db, select(func.count(Order.id)).where(func.coalesce(Order.total, 0) == 0)
+        ),
+        "itemsWithZeroQuantity": _scalar_int(
+            db,
+            select(func.count(OrderItem.id)).where(
+                OrderItem.excluded.is_(False),
+                func.coalesce(OrderItem.quantity, 0) == 0
+            ),
+        ),
+        "itemsWithZeroTotal": _scalar_int(
+            db,
+            select(func.count(OrderItem.id)).where(
+                OrderItem.excluded.is_(False),
+                func.coalesce(OrderItem.total, 0) == 0
+            ),
+        ),
+    }
+    missing_dimensions = {
+        "productsWithoutCategory": _scalar_int(
+            db,
+            select(func.count(Product.id)).where(
+                or_(Product.category_id.is_(None), func.trim(Product.category_id) == "")
+            ),
+        )
+    }
+    duplicates = {
+        "customerDocumentGroups": _duplicate_groups(db, Customer.document),
+        "productCodeGroups": _duplicate_groups(db, Product.code),
+    }
+    empty_raw = {
+        table_name: _empty_raw_count(db, model)
+        for table_name, model in RAW_MODELS.items()
+    }
+
+    warnings: list[str] = []
+    if total_orders == 0:
+        warnings.append("Nenhum pedido foi persistido.")
+    if coverage["ordersWithItemsPct"] < 95:
+        warnings.append(
+            "Cobertura de itens abaixo de 95%; rankings de produtos não são confiáveis."
+        )
+    if coverage["ordersWithCustomerPct"] < 95:
+        warnings.append("Cobertura de clientes nos pedidos abaixo de 95%.")
+    if coverage["ordersWithSellerPct"] < 95:
+        warnings.append("Cobertura de vendedores nos pedidos abaixo de 95%.")
+    if order_total_divergences:
+        warnings.append(
+            f"{order_total_divergences} pedido(s) divergem da soma de seus itens."
+        )
+    elif order_total_divergences is None:
+        warnings.append(
+            "Divergência pedido × itens não foi calculada: a consulta excedeu o tempo."
+        )
+    incomplete_statuses = {"running", "partial", "interrupted", "error"}
+    incomplete_sync = [row.resource for row in sync_rows if row.status in incomplete_statuses]
+    if incomplete_sync:
+        warnings.append(
+            "Sincronização incompleta em: " + ", ".join(sorted(incomplete_sync)) + "."
+        )
+
+    generated_at = datetime.now(timezone.utc)
+    is_partial = bool(incomplete_sync) or coverage["ordersWithItemsPct"] < 95
+    return {
+        "coverage": coverage,
+        "integrity": integrity,
+        "dateRange": {"min": min_date, "max": max_date},
+        "sync": sync,
+        "warnings": warnings,
+        "counts": {
+            "customers": total_customers,
+            "products": total_products,
+            "sellers": total_sellers,
+            "orders": total_orders,
+            "orderItems": total_items,
+        },
+        "zeroValues": zero_values,
+        "duplicates": duplicates,
+        "missingDimensions": missing_dimensions,
+        "emptyRaw": empty_raw,
+        "metadata": {
+            "generatedAt": generated_at,
+            "dataThrough": data_through_timestamp(db) or max_date,
+            "isPartial": is_partial,
+            "warnings": warnings,
+        },
+        "rawFieldInventory": (
+            raw_field_inventory(db, raw_sample_limit)
+            if include_raw_inventory
+            else None
+        ),
+    }
