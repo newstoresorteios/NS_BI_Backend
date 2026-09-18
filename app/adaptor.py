@@ -36,6 +36,7 @@ DEFAULT_429_WAIT = 20.0
 RATE_LIMIT_BUDGET = 240.0
 PAGE_SIZE = 50
 ORDER_PAGE_SIZE = 10
+ORDER_CURSOR_PREFIX = "tray-order-desc-page:"
 
 _request_lock = asyncio.Lock()
 _not_before = 0.0
@@ -129,17 +130,22 @@ def _watermark(rows: list[dict], previous: str | None) -> str | None:
 
 
 def _decode_cursor(cursor: str | None) -> tuple[int, str | None, str | None]:
-    if cursor and cursor.startswith("tray-page:"):
-        _, page, state = cursor.split(":", 2)
+    if cursor and cursor.startswith(("tray-page:", ORDER_CURSOR_PREFIX)):
+        prefix = ORDER_CURSOR_PREFIX if cursor.startswith(ORDER_CURSOR_PREFIX) else "tray-page:"
+        page, state = cursor[len(prefix):].split(":", 1)
         base_since, _, watermark = state.partition("|")
         return max(int(page), 1), base_since or None, watermark or None
     return 1, cursor or None, cursor or None
 
 
 def _encode_cursor(
-    page: int, base_since: str | None, watermark: str | None
+    page: int,
+    base_since: str | None,
+    watermark: str | None,
+    *,
+    prefix: str = "tray-page:",
 ) -> str:
-    return f"tray-page:{page}:{base_since or ''}|{watermark or ''}"
+    return f"{prefix}{page}:{base_since or ''}|{watermark or ''}"
 
 
 def _sale_status(order: dict) -> str:
@@ -473,6 +479,15 @@ class Adaptor:
         page, base_since, accumulated_watermark = _decode_cursor(cursor)
         page_size = ORDER_PAGE_SIZE if resource == "orders" else PAGE_SIZE
         params: dict[str, object] = {"page": page, "limit": page_size}
+        cursor_prefix = "tray-page:"
+        if resource == "orders":
+            params["sort"] = "id_desc"
+            cursor_prefix = ORDER_CURSOR_PREFIX
+            # One-time migration from the former ascending pagination. Starting
+            # the descending stream at its old page would skip the newest data.
+            if cursor and cursor.startswith("tray-page:") and not base_since:
+                page = 1
+                params["page"] = 1
         if base_since and resource in {"orders", "customers"}:
             params["lastModifiedStart"] = base_since
         payload = await self._get(path, params=params, retries=retries)
@@ -495,7 +510,12 @@ class Adaptor:
         return {
             "data": rows,
             "nextCursor": (
-                _encode_cursor(current_page + 1, base_since, current_watermark)
+                _encode_cursor(
+                    current_page + 1,
+                    base_since,
+                    current_watermark,
+                    prefix=cursor_prefix,
+                )
                 if has_next
                 else None
             ),
@@ -503,7 +523,10 @@ class Adaptor:
             # not expose a universal changed-since filter in Tray, so their
             # incremental checkpoint is the next source page.
             "checkpointCursor": _encode_cursor(
-                current_page + 1, base_since, current_watermark
+                current_page + 1,
+                base_since,
+                current_watermark,
+                prefix=cursor_prefix,
             ),
             "pageCursor": current_watermark,
         }

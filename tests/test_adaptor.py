@@ -58,7 +58,7 @@ async def test_list_translates_tray_products_and_pagination(monkeypatch):
 async def test_orders_use_small_pages_for_frequent_checkpoints(monkeypatch):
     async def fake_get(self, path, *, params=None, retries=8):
         assert path == "/internal/orders"
-        assert params == {"page": 1, "limit": 10}
+        assert params == {"page": 1, "limit": 10, "sort": "id_desc"}
         return {
             "paging": {"total": 0, "page": 1, "limit": 10},
             "orders": [],
@@ -70,6 +70,24 @@ async def test_orders_use_small_pages_for_frequent_checkpoints(monkeypatch):
 
     assert result["data"] == []
     assert result["nextCursor"] is None
+
+
+@pytest.mark.asyncio
+async def test_orders_migrate_ascending_cursor_to_newest_first(monkeypatch):
+    async def fake_get(self, path, *, params=None, retries=8):
+        assert path == "/internal/orders"
+        assert params == {"page": 1, "limit": 10, "sort": "id_desc"}
+        return {
+            "paging": {"total": 20, "page": 1, "limit": 10},
+            "orders": [{"id": 99, "date": "2026-09-18"}],
+        }
+
+    monkeypatch.setattr(Adaptor, "_get", fake_get)
+
+    result = await Adaptor().list("orders", "tray-page:12:|2026-09-11")
+
+    assert result["data"][0]["id"] == 99
+    assert result["nextCursor"].startswith("tray-order-desc-page:2:")
 
 
 @pytest.mark.asyncio
