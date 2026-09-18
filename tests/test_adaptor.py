@@ -94,6 +94,7 @@ async def test_orders_migrate_ascending_cursor_to_newest_first(monkeypatch):
 async def test_customer_preserves_complete_registration(monkeypatch):
     async def fake_get(self, path, *, params=None, retries=8):
         assert path == "/internal/customers"
+        assert params == {"page": 1, "limit": 50, "sort": "id_desc"}
         return {
             "paging": {"total": 1, "page": 1, "limit": 50},
             "customers": [
@@ -123,6 +124,24 @@ async def test_customer_preserves_complete_registration(monkeypatch):
     assert customer["observacao"] == "Lead prioritario"
     assert customer["enderecos"][0]["id"] == "address-1"
     assert customer["tray"]["credit_limit"] == "2500.00"
+
+
+@pytest.mark.asyncio
+async def test_customers_migrate_ascending_cursor_to_newest_first(monkeypatch):
+    async def fake_get(self, path, *, params=None, retries=8):
+        assert path == "/internal/customers"
+        assert params == {"page": 1, "limit": 50, "sort": "id_desc"}
+        return {
+            "paging": {"total": 100, "page": 1, "limit": 50},
+            "customers": [{"id": "newest", "name": "Cliente recente"}],
+        }
+
+    monkeypatch.setattr(Adaptor, "_get", fake_get)
+
+    result = await Adaptor().list("customers", "tray-page:40:|2025-09-29")
+
+    assert result["data"][0]["id"] == "newest"
+    assert result["nextCursor"].startswith("tray-customer-desc-page:2:")
 
 
 @pytest.mark.asyncio

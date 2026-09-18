@@ -37,6 +37,7 @@ RATE_LIMIT_BUDGET = 240.0
 PAGE_SIZE = 50
 ORDER_PAGE_SIZE = 10
 ORDER_CURSOR_PREFIX = "tray-order-desc-page:"
+CUSTOMER_CURSOR_PREFIX = "tray-customer-desc-page:"
 
 _request_lock = asyncio.Lock()
 _not_before = 0.0
@@ -130,8 +131,9 @@ def _watermark(rows: list[dict], previous: str | None) -> str | None:
 
 
 def _decode_cursor(cursor: str | None) -> tuple[int, str | None, str | None]:
-    if cursor and cursor.startswith(("tray-page:", ORDER_CURSOR_PREFIX)):
-        prefix = ORDER_CURSOR_PREFIX if cursor.startswith(ORDER_CURSOR_PREFIX) else "tray-page:"
+    prefixes = ("tray-page:", ORDER_CURSOR_PREFIX, CUSTOMER_CURSOR_PREFIX)
+    if cursor and cursor.startswith(prefixes):
+        prefix = next(value for value in prefixes if cursor.startswith(value))
         page, state = cursor[len(prefix):].split(":", 1)
         base_since, _, watermark = state.partition("|")
         return max(int(page), 1), base_since or None, watermark or None
@@ -503,9 +505,13 @@ class Adaptor:
         page_size = ORDER_PAGE_SIZE if resource == "orders" else PAGE_SIZE
         params: dict[str, object] = {"page": page, "limit": page_size}
         cursor_prefix = "tray-page:"
-        if resource == "orders":
+        if resource in {"orders", "customers"}:
             params["sort"] = "id_desc"
-            cursor_prefix = ORDER_CURSOR_PREFIX
+            cursor_prefix = (
+                ORDER_CURSOR_PREFIX
+                if resource == "orders"
+                else CUSTOMER_CURSOR_PREFIX
+            )
             # One-time migration from the former ascending pagination. Starting
             # the descending stream at its old page would skip the newest data.
             if cursor and cursor.startswith("tray-page:") and not base_since:
