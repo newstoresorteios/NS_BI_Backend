@@ -372,6 +372,13 @@ def test_overview_separates_sales_and_cancellations_with_comparison() -> None:
         assert result["kpis"]["cancellations"]["value"] == Decimal("1")
         assert result["kpis"]["cancelledValue"]["value"] == Decimal("20.00")
         assert result["kpis"]["discountTotal"]["value"] == Decimal("10.00")
+        assert result["kpis"]["cancellationRate"]["value"] == Decimal("50")
+        assert result["kpis"]["cancellationRate"]["absoluteChange"] == Decimal("50")
+        assert result["kpis"]["cancellationRate"]["percentageChange"] is None
+        assert result["kpis"]["averageDiscountPct"]["value"].quantize(
+            Decimal("0.01")
+        ) == Decimal("9.09")
+        assert result["kpis"]["itemsPerOrder"]["value"] == Decimal("2")
         assert result["kpis"]["netRevenue"]["previousValue"] == Decimal("50.00")
         assert result["kpis"]["netRevenue"]["percentageChange"] == 100.0
         assert result["comparison"] == {
@@ -419,6 +426,75 @@ def test_overview_uses_mercos_order_total_without_items() -> None:
 
         assert result["kpis"]["netRevenue"]["value"] == Decimal("750000.00")
         assert result["kpis"]["orders"]["value"] == Decimal("1")
+
+
+def test_overview_rate_percentages_use_consistent_denominators() -> None:
+    with make_session() as db:
+        orders = []
+        for index in range(3):
+            orders.append(
+                Order(
+                    mercos_id=f"current-{index}",
+                    number=f"C{index}",
+                    status="order",
+                    issued_at=datetime(2026, 8, 5, tzinfo=timezone.utc),
+                    total=Decimal("80"),
+                    gross_total=Decimal("100"),
+                    net_total=Decimal("80"),
+                    discount_value=Decimal("20"),
+                )
+            )
+        orders.extend(
+            [
+                Order(
+                    mercos_id="current-cancelled-rate",
+                    number="CC",
+                    status="cancelled",
+                    issued_at=datetime(2026, 8, 5, tzinfo=timezone.utc),
+                    total=Decimal("40"),
+                ),
+                Order(
+                    mercos_id="previous-valid-rate",
+                    number="PV",
+                    status="order",
+                    issued_at=datetime(2026, 7, 5, tzinfo=timezone.utc),
+                    total=Decimal("90"),
+                    gross_total=Decimal("100"),
+                    net_total=Decimal("90"),
+                    discount_value=Decimal("10"),
+                ),
+                Order(
+                    mercos_id="previous-cancelled-rate",
+                    number="PC",
+                    status="cancelled",
+                    issued_at=datetime(2026, 7, 5, tzinfo=timezone.utc),
+                    total=Decimal("40"),
+                ),
+            ]
+        )
+        db.add_all(orders)
+        db.commit()
+
+        result = overview(
+            db,
+            AnalyticsFilters(
+                dateFrom=date(2026, 8, 1),
+                dateTo=date(2026, 8, 12),
+                period="all",
+            ),
+        )
+
+        cancellation = result["kpis"]["cancellationRate"]
+        discount = result["kpis"]["averageDiscountPct"]
+        assert cancellation["value"] == Decimal("25")
+        assert cancellation["previousValue"] == Decimal("50")
+        assert cancellation["absoluteChange"] == Decimal("-25")
+        assert cancellation["percentageChange"] == -50.0
+        assert cancellation["isPositive"] is True
+        assert discount["value"] == Decimal("20")
+        assert discount["previousValue"] == Decimal("10")
+        assert discount["absoluteChange"] == Decimal("10")
+        assert discount["percentageChange"] == 100.0
 
 
 def test_all_history_buyer_mix_uses_purchase_frequency() -> None:

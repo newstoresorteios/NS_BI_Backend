@@ -158,6 +158,19 @@ CREATE TABLE orders (
     discount_percent NUMERIC(9, 4),
     item_count INTEGER,
     sku_count INTEGER,
+    shipping_method_id VARCHAR(80),
+    shipping_method VARCHAR(200),
+    shipping_cost NUMERIC(18, 2),
+    shipment_status VARCHAR(80),
+    tracking_code VARCHAR(200),
+    tracking_url TEXT,
+    shipped_at TIMESTAMP WITH TIME ZONE,
+    delivered_at TIMESTAMP WITH TIME ZONE,
+    estimated_delivery VARCHAR(120),
+    shipment_integrator VARCHAR(160),
+    distribution_center_id VARCHAR(80),
+    shipping_city VARCHAR(120),
+    shipping_state VARCHAR(10),
     source_created_at TIMESTAMP WITH TIME ZONE,
     source_updated_at TIMESTAMP WITH TIME ZONE,
     raw JSON NOT NULL
@@ -165,6 +178,8 @@ CREATE TABLE orders (
 CREATE INDEX ix_orders_carrier_mercos_id ON orders (carrier_mercos_id);
 CREATE INDEX ix_orders_commercial_policy_mercos_id ON orders (commercial_policy_mercos_id);
 CREATE INDEX ix_orders_customer_mercos_id ON orders (customer_mercos_id);
+CREATE INDEX ix_orders_delivered_at ON orders (delivered_at);
+CREATE INDEX ix_orders_distribution_center_id ON orders (distribution_center_id);
 CREATE INDEX ix_orders_issued_at ON orders (issued_at);
 CREATE UNIQUE INDEX ix_orders_mercos_id ON orders (mercos_id);
 CREATE INDEX ix_orders_number ON orders (number);
@@ -172,7 +187,15 @@ CREATE INDEX ix_orders_order_type_mercos_id ON orders (order_type_mercos_id);
 CREATE INDEX ix_orders_payment_condition_mercos_id ON orders (payment_condition_mercos_id);
 CREATE INDEX ix_orders_price_table_mercos_id ON orders (price_table_mercos_id);
 CREATE INDEX ix_orders_seller_mercos_id ON orders (seller_mercos_id);
+CREATE INDEX ix_orders_shipped_at ON orders (shipped_at);
+CREATE INDEX ix_orders_shipment_integrator ON orders (shipment_integrator);
+CREATE INDEX ix_orders_shipment_status ON orders (shipment_status);
+CREATE INDEX ix_orders_shipping_city ON orders (shipping_city);
+CREATE INDEX ix_orders_shipping_method ON orders (shipping_method);
+CREATE INDEX ix_orders_shipping_method_id ON orders (shipping_method_id);
+CREATE INDEX ix_orders_shipping_state ON orders (shipping_state);
 CREATE INDEX ix_orders_status ON orders (status);
+CREATE INDEX ix_orders_tracking_code ON orders (tracking_code);
 
 CREATE TABLE payment_conditions (
     id SERIAL PRIMARY KEY,

@@ -74,6 +74,18 @@ class SuccessfulAdaptor:
             "numero": 100,
             "status": 2,
             "total": "25,00",
+            "metodo_envio_id": "7",
+            "metodo_envio": "Transportadora",
+            "valor_frete": "18,90",
+            "status_envio": "shipped",
+            "codigo_rastreio": "TRACK-10",
+            "url_rastreio": "https://tracking.example/TRACK-10",
+            "data_envio": "2026-08-13T12:00:00+00:00",
+            "previsao_entrega": "5",
+            "integrador_envio": "Intelipost",
+            "centro_distribuicao_id": "2",
+            "cidade_entrega": "Curitiba",
+            "estado_entrega": "pr",
             "itens": [
                 {
                     "id": 501,
@@ -110,6 +122,15 @@ async def test_order_sync_fetches_detail_and_is_idempotent(sync_db, monkeypatch)
         assert order.net_total == Decimal("25.00")
         assert order.item_count == 2
         assert order.sku_count == 2
+        assert order.shipping_method_id == "7"
+        assert order.shipping_method == "Transportadora"
+        assert order.shipping_cost == Decimal("18.90")
+        assert order.shipment_status == "shipped"
+        assert order.tracking_code == "TRACK-10"
+        assert order.shipment_integrator == "Intelipost"
+        assert order.distribution_center_id == "2"
+        assert order.shipping_city == "Curitiba"
+        assert order.shipping_state == "PR"
         state = db.get(SyncState, "orders")
         assert state.cursor == "2026-08-12T12:00:00+00:00"
         runs = list(db.scalars(select(SyncRun).order_by(SyncRun.id)))

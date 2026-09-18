@@ -11,10 +11,13 @@ navegação do dashboard.
 - produtos, estoque, curva ABC e oportunidades comerciais;
 - clientes, retenção, LTV, coortes e CRM;
 - vendedores, filtros globais e exportação;
-- trilha de sincronizações, auditoria de qualidade e autenticação;
+- trilha de sincronizações e auditoria de qualidade;
+- logística por pedido com modalidade, custo, rastreio, postagem, entrega,
+  integrador, destino e estatísticas operacionais;
 - sincronização incremental de pedidos e clientes;
 - carga paginada de produtos, variantes, propriedades, categorias, marcas,
-  clientes, endereços, usuários, kits, cupons e centros de distribuição;
+  clientes, endereços, usuários, kits, cupons, centros de distribuição e
+  métodos de envio;
 - detalhes completos de cada pedido, incluindo todos os itens.
 
 ## Execução local

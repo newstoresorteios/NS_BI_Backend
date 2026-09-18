@@ -153,6 +153,48 @@ def _sale_status(order: dict) -> str:
     return "order" if _bool(order.get("has_payment"), False) else "quote"
 
 
+def _first(mapping: dict, *keys: str):
+    for key in keys:
+        value = mapping.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _shipment_status(order: dict) -> str:
+    raw = str(
+        _first(
+            order,
+            "shipment_status",
+            "shipping_status",
+            "status_frete_ml",
+            "status_group",
+            "status",
+        )
+        or ""
+    ).strip().lower()
+    delivered = _first(order, "delivery_date", "date_delivered", "delivered_at")
+    delivered_flag = str(order.get("delivered") or "").strip().lower()
+    if delivered or delivered_flag in {"1", "true", "yes", "sim"} or raw in {
+        "completed",
+        "delivered",
+        "entregue",
+        "finalizado",
+    }:
+        return "delivered"
+    if (
+        _first(order, "shipment_date", "sending_date", "shipped_at", "sending_code")
+        or raw in {"shipped", "sent", "enviado"}
+    ):
+        return "shipped"
+    if _first(order, "shipment", "shipping_method", "shipping_id") or raw in {
+        "awaiting_shipment",
+        "a enviar",
+    }:
+        return "awaiting_shipment"
+    return "not_informed"
+
+
 def _customer(row: dict) -> dict:
     email = row.get("email")
     return {
@@ -222,6 +264,11 @@ def _raw_entity(row: dict) -> dict:
 
 
 def _order_header(row: dict) -> dict:
+    address = row.get("customer_address") or row.get("CustomerAddress") or {}
+    if isinstance(address, list):
+        address = address[0] if address else {}
+    if not isinstance(address, dict):
+        address = {}
     return {
         "id": row.get("id"),
         "numero": row.get("id"),
@@ -235,18 +282,51 @@ def _order_header(row: dict) -> dict:
         "total": row.get("total") or 0,
         "total_liquido": row.get("total") or 0,
         "condicao_pagamento_id": row.get("payment_method_id"),
+        "metodo_envio_id": _first(row, "shipping_id", "shipping_method_id"),
+        "metodo_envio": _first(row, "shipment", "shipping_method"),
+        "valor_frete": _first(row, "shipment_value", "shipping_value", "shipping_cost"),
+        "status_envio": _shipment_status(row),
+        "codigo_rastreio": _first(row, "sending_code", "tracking_code"),
+        "url_rastreio": _first(row, "tracking_url", "shipment_tracking_url"),
+        "data_envio": _first(row, "shipment_date", "sending_date", "shipped_at"),
+        "data_entrega": _first(row, "delivery_date", "date_delivered", "delivered_at"),
+        "previsao_entrega": _first(
+            row,
+            "estimated_delivery_date",
+            "estimated_delivery_time",
+            "estimated_delivery",
+        ),
+        "integrador_envio": _first(row, "shipment_integrator", "shipping_integrator"),
+        "centro_distribuicao_id": _first(row, "dc_id", "distribution_center_id"),
+        "cidade_entrega": _first(row, "shipping_city", "delivery_city")
+        or _first(address, "city"),
+        "estado_entrega": _first(row, "shipping_state", "delivery_state")
+        or _first(address, "state"),
         "tray": row,
     }
 
 
 def _order_detail(payload: dict, order_id: str) -> dict:
     order = payload.get("order") if isinstance(payload.get("order"), dict) else {}
+    shipping = payload.get("shipping") if isinstance(payload.get("shipping"), dict) else {}
+    address = next(
+        (
+            payload.get(key)
+            for key in ("customer_address", "customerAddress", "CustomerAddress", "address")
+            if isinstance(payload.get(key), (dict, list))
+        ),
+        order.get("customer_address") or order.get("CustomerAddress"),
+    )
+    combined_order = {**order, **shipping}
+    if address:
+        combined_order["customer_address"] = address
     products = payload.get("products") if isinstance(payload.get("products"), list) else []
     header = {
         key: value
-        for key, value in _order_header({"id": order_id, **order}).items()
+        for key, value in _order_header({"id": order_id, **combined_order}).items()
         if value is not None
     }
+    header["tray"] = payload
     header["itens"] = []
     for position, product in enumerate(products):
         quantity = _decimal(product.get("quantity") or 0)
@@ -288,6 +368,11 @@ RESOURCE_MAP = {
     "distribution-centers": (
         "/internal/inventory/distribution-centers",
         "distribution_centers",
+        _raw_entity,
+    ),
+    "shipping-methods": (
+        "/internal/shippings/methods",
+        ("shipping_methods", "methods", "shippings"),
         _raw_entity,
     ),
 }
@@ -389,7 +474,11 @@ class Adaptor:
         if base_since and resource in {"orders", "customers"}:
             params["lastModifiedStart"] = base_since
         payload = await self._get(path, params=params, retries=retries)
-        source_rows = payload.get(key) if isinstance(payload.get(key), list) else []
+        keys = (key,) if isinstance(key, str) else key
+        source_rows = next(
+            (payload.get(candidate) for candidate in keys if isinstance(payload.get(candidate), list)),
+            [],
+        )
         rows = [
             normalizer(row)
             for row in source_rows

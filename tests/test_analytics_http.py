@@ -41,6 +41,10 @@ def http_client():
                 issued_at=datetime(2026, 8, 12, 12, tzinfo=timezone.utc),
                 total=Decimal("100"),
                 net_total=Decimal("100"),
+                shipping_method="SEDEX",
+                shipping_cost=Decimal("15"),
+                shipment_status="shipped",
+                tracking_code="BR123",
             ),
             OrderItem(
                 order_mercos_id="o1",
@@ -69,6 +73,13 @@ def test_analytics_http_contracts_cover_pages_charts_and_drilldowns(http_client)
     query = "?period=all&granularity=month"
     expected_shapes = {
         "/api/v1/analytics/overview": {"kpis", "metadata", "appliedFilters"},
+        "/api/v1/analytics/logistics": {
+            "summary",
+            "byStatus",
+            "byMethod",
+            "items",
+            "metadata",
+        },
         "/api/v1/analytics/timeseries": {
             "items",
             "previousItems",

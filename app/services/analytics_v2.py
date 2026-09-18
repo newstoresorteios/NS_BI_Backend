@@ -15,7 +15,6 @@ from sqlalchemy import (
     desc,
     exists,
     func,
-    literal,
     or_,
     select,
 )
@@ -457,13 +456,19 @@ def overview(db: Session, filters: AnalyticsFilters) -> dict[str, Any]:
         "newBuyers": "Clientes cuja primeira venda válida ocorreu no período.",
         "recurringBuyers": "Clientes do período cuja primeira venda válida ocorreu antes dele.",
         "cancellations": "Pedidos com status cancelado no período.",
-        "cancellationRate": "Cancelamentos divididos por todos os pedidos filtrados.",
+        "cancellationRate": (
+            "Cancelamentos divididos por todos os pedidos filtrados; "
+            "o comparativo da taxa é exibido em pontos percentuais."
+        ),
         "cancelledValue": "Soma do total Tray dos pedidos cancelados.",
         "discountTotal": (
             "Soma do desconto informado pela Tray no pedido "
             "(valor_desconto/desconto)."
         ),
-        "averageDiscountPct": "Desconto total dividido pelo faturamento Tray.",
+        "averageDiscountPct": (
+            "Desconto total dividido pelo faturamento bruto antes dos descontos; "
+            "o comparativo da taxa é exibido em pontos percentuais."
+        ),
         "items": "Quantidade de linhas de item informada nos pedidos válidos.",
         "skus": "Soma dos SKUs distintos registrados por pedido válido.",
         "itemsPerOrder": "Quantidade de itens dividida pelos pedidos válidos.",

@@ -27,6 +27,7 @@ from app.services.analytics_v2 import (
     timeseries,
 )
 from app.services.price_savings import price_savings
+from app.services.logistics import logistics_overview
 
 
 router = APIRouter(prefix="/api/v1/analytics", tags=["analytics"])
@@ -38,6 +39,39 @@ def get_overview(
     db: Session = Depends(db_session),
 ):
     return overview(db, filters)
+
+
+@router.get("/logistics")
+def get_logistics(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    search: str | None = Query(None, max_length=200),
+    status: Literal[
+        "awaiting_shipment", "shipped", "delivered", "not_informed"
+    ] | None = Query(None),
+    sort: Literal[
+        "issued_at",
+        "shipped_at",
+        "delivered_at",
+        "shipping_cost",
+        "number",
+        "shipping_method",
+        "shipment_status",
+    ] = Query("issued_at"),
+    order: Literal["asc", "desc"] = Query("desc"),
+    filters: AnalyticsFilters = Depends(analytics_filters),
+    db: Session = Depends(db_session),
+):
+    return logistics_overview(
+        db,
+        filters,
+        page=page,
+        page_size=page_size,
+        search=search,
+        status=status,
+        sort=sort,
+        order=order,
+    )
 
 
 @router.get("/timeseries")

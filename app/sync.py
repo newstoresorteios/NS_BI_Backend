@@ -62,6 +62,7 @@ CATALOG_RESOURCES = (
     "kits",
     "coupons",
     "distribution-centers",
+    "shipping-methods",
 )
 OPTIONAL_CATALOG_RESOURCES = {
     "categories",
@@ -73,6 +74,7 @@ OPTIONAL_CATALOG_RESOURCES = {
     "kits",
     "coupons",
     "distribution-centers",
+    "shipping-methods",
 }
 RAW_ENTITY_RESOURCES = OPTIONAL_CATALOG_RESOURCES - {"categories", "users"}
 SYNC_RESOURCES = (*CATALOG_RESOURCES, "orders")
@@ -373,6 +375,39 @@ def _upsert_rows(db, resource: str, rows: list):
                     for item in items
                     if item.get("produto_id") is not None
                 }
+            )
+            obj.shipping_method_id = (
+                str(row.get("metodo_envio_id") or "") or None
+            )
+            obj.shipping_method = (
+                str(row.get("metodo_envio") or "").strip() or None
+            )
+            obj.shipping_cost = optional_decimal(row, "valor_frete")
+            obj.shipment_status = (
+                str(row.get("status_envio") or "").strip() or None
+            )
+            obj.tracking_code = (
+                str(row.get("codigo_rastreio") or "").strip() or None
+            )
+            obj.tracking_url = (
+                str(row.get("url_rastreio") or "").strip() or None
+            )
+            obj.shipped_at = dt(row.get("data_envio"))
+            obj.delivered_at = dt(row.get("data_entrega"))
+            obj.estimated_delivery = (
+                str(row.get("previsao_entrega") or "").strip() or None
+            )
+            obj.shipment_integrator = (
+                str(row.get("integrador_envio") or "").strip() or None
+            )
+            obj.distribution_center_id = (
+                str(row.get("centro_distribuicao_id") or "") or None
+            )
+            obj.shipping_city = (
+                str(row.get("cidade_entrega") or "").strip() or None
+            )
+            obj.shipping_state = (
+                str(row.get("estado_entrega") or "").strip().upper() or None
             )
             if "data_criacao" in row:
                 obj.source_created_at = dt(row.get("data_criacao"))

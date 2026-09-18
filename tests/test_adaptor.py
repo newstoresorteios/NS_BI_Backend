@@ -101,7 +101,14 @@ def test_order_complete_preserves_every_item_and_discount():
                 "status": "FINALIZADO",
                 "status_group": "completed",
                 "total": "180.00",
+                "shipment": "SEDEX",
+                "shipment_value": "24.90",
+                "sending_code": "BR123",
+                "sending_date": "2026-09-10T12:00:00Z",
+                "tracking_url": "https://tracking.example/BR123",
+                "dc_id": "4",
             },
+            "customer_address": {"city": "São Paulo", "state": "SP"},
             "products": [
                 {
                     "product_id": 7,
@@ -126,6 +133,13 @@ def test_order_complete_preserves_every_item_and_discount():
     assert len(result["itens"]) == 2
     assert Decimal(result["itens"][0]["desconto"]) == Decimal("20.00")
     assert result["itens"][1]["produto_id"] == 8
+    assert result["metodo_envio"] == "SEDEX"
+    assert result["valor_frete"] == "24.90"
+    assert result["status_envio"] == "delivered"
+    assert result["codigo_rastreio"] == "BR123"
+    assert result["centro_distribuicao_id"] == "4"
+    assert result["cidade_entrega"] == "São Paulo"
+    assert result["tray"]["order"]["id"] == 123
 
 
 @pytest.mark.parametrize(
