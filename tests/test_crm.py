@@ -6,52 +6,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from app.auth import AuthUser, authenticate, current_user, decode_token, issue_tokens
-from app.config import Settings
 from app.database import Base, db_session
 from app.main import app
 from app.models import Customer, Order, OrderItem
-from app import auth as auth_module
-
-
-def test_admin_email_login_issues_token(monkeypatch):
-    config = Settings(
-        jwt_secret="test-secret-with-enough-entropy",
-        auth_admin_username="admin@xnamai.com",
-        auth_admin_password="123456",
-        auth_cookie_secure=False,
-        bi_api_key="service-key",
-    )
-    monkeypatch.setattr(auth_module, "settings", lambda: config)
-    user = authenticate(auth_module.LoginRequest(username="Admin@Xnamai.com", password="123456"))
-    assert user.username == "admin@xnamai.com"
-    from fastapi import Response
-
-    result = issue_tokens(user, Response())
-    decoded = decode_token(result.accessToken, "access")
-    assert decoded.role == "admin"
-
-
-def test_current_user_requires_token_or_api_key(monkeypatch):
-    config = Settings(
-        jwt_secret="test-secret-with-enough-entropy",
-        auth_admin_username="admin@xnamai.com",
-        auth_admin_password="123456",
-        bi_api_key="service-key",
-    )
-    monkeypatch.setattr(auth_module, "settings", lambda: config)
-    from fastapi import HTTPException
-
-    try:
-        current_user(credentials=None, x_api_key=None)
-        raise AssertionError("should require auth")
-    except HTTPException as error:
-        assert error.status_code == 401
-
-    service = current_user(credentials=None, x_api_key="service-key")
-    assert service.username == "service"
-
-
 def test_crm_prioritizes_high_revenue_inactive_clients():
     engine = create_engine(
         "sqlite://",
@@ -205,7 +162,6 @@ def test_crm_queue_hides_finished_leads_and_exposes_top_20():
         yield session
 
     app.dependency_overrides[db_session] = override_db
-    app.dependency_overrides[current_user] = lambda: AuthUser(username="admin@xnamai.com", role="admin")
     try:
         with TestClient(app) as client:
             listed = client.get("/api/v1/crm/leads?top=1")

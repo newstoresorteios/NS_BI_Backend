@@ -21,13 +21,11 @@ from app.analytics import (
     product_movers,
     rankings,
 )
-from app.auth import current_user, require_admin
 from app.config import settings
 from app.database import Base, SessionLocal, db_session, engine
 from app.middleware.rate_limit import ApiRateLimitMiddleware
 from app.models import Customer, Order, Product, Seller, SyncRun, SyncState
 from app.routers.analytics import router as analytics_router
-from app.routers.auth import router as auth_router
 from app.routers.crm import router as crm_router
 from app.routers.exports import router as exports_router
 from app.schemas.data_quality import DataQualityResponse
@@ -53,10 +51,6 @@ async def lifespan(app):
     Base.metadata.create_all(engine)
     cfg = settings()
     log.info("CORS origins: %s", cfg.origins)
-    if not cfg.auth_admin_password:
-        log.warning("AUTH_ADMIN_PASSWORD missing: interactive login is disabled")
-    if cfg.jwt_secret == "change-me-in-production":
-        log.warning("JWT_SECRET is using the development default")
     # Never auto-resume Tray sync on boot; it can starve dashboard reads on small instances.
     # User clicks Sincronizar / Primeira carga when they want to sync.
     with SessionLocal() as db:
@@ -166,10 +160,8 @@ async def database_timeout_handler(request, exc: OperationalError):
     )
 
 
-auth = current_user
-app.include_router(auth_router)
 app.include_router(crm_router)
-app.include_router(analytics_router, dependencies=[Depends(current_user)])
+app.include_router(analytics_router)
 app.include_router(exports_router)
 
 
@@ -180,7 +172,6 @@ def health():
 
 @app.get(
     "/api/v1/data-quality",
-    dependencies=[Depends(require_admin)],
     response_model=DataQualityResponse,
     tags=["admin"],
 )
@@ -189,17 +180,17 @@ def data_quality(db: Session = Depends(db_session)):
     return build_data_quality_report(db)
 
 
-@app.get("/api/v1/dashboard", dependencies=[Depends(auth)])
+@app.get("/api/v1/dashboard")
 def get_dashboard(days: int = Query(30, ge=0, le=3650), db: Session = Depends(db_session)):
     return dashboard(db, days)
 
 
-@app.get("/api/v1/rankings", dependencies=[Depends(auth)])
+@app.get("/api/v1/rankings")
 def get_rankings(days: int = Query(30, ge=0, le=3650), db: Session = Depends(db_session)):
     return rankings(db, days)
 
 
-@app.get("/api/v1/intelligence/customers", dependencies=[Depends(auth)])
+@app.get("/api/v1/intelligence/customers")
 def get_customer_intelligence(
     inactive_days: int = Query(90, ge=14, le=730),
     risk_days: int = Query(90, ge=7, le=365),
@@ -220,7 +211,7 @@ def get_customer_intelligence(
     )
 
 
-@app.get("/api/v1/intelligence/leads", dependencies=[Depends(auth)])
+@app.get("/api/v1/intelligence/leads")
 def get_leads(
     inactive_days: int = Query(90, ge=14, le=730),
     risk_days: int = Query(45, ge=7, le=365),
@@ -230,7 +221,7 @@ def get_leads(
     return leads_to_recover(db, inactive_days=inactive_days, risk_days=risk_days, limit=limit)
 
 
-@app.get("/api/v1/intelligence/dead-stock", dependencies=[Depends(auth)])
+@app.get("/api/v1/intelligence/dead-stock")
 def get_dead_stock(
     no_sale_days: int = Query(90, ge=14, le=730),
     limit: int = Query(200, ge=1, le=2000),
@@ -239,12 +230,12 @@ def get_dead_stock(
     return dead_stock(db, no_sale_days=no_sale_days, limit=limit)
 
 
-@app.get("/api/v1/intelligence/product-movers", dependencies=[Depends(auth)])
+@app.get("/api/v1/intelligence/product-movers")
 def get_product_movers(days: int = Query(365, ge=0, le=3650), db: Session = Depends(db_session)):
     return product_movers(db, days=days)
 
 
-@app.get("/api/v1/orders", dependencies=[Depends(auth)])
+@app.get("/api/v1/orders")
 def orders(
     limit: int = Query(200, le=2000),
     days: int = Query(0, ge=0, le=3650),
@@ -282,7 +273,7 @@ def orders(
     ]
 
 
-@app.get("/api/v1/orders/insight", dependencies=[Depends(auth)])
+@app.get("/api/v1/orders/insight")
 def get_orders_insight(
     days: int = Query(30, ge=0, le=3650),
     limit: int = Query(10, ge=1, le=50),
@@ -291,7 +282,7 @@ def get_orders_insight(
     return orders_insight(db, days=days, limit=limit)
 
 
-@app.get("/api/v1/products", dependencies=[Depends(auth)])
+@app.get("/api/v1/products")
 def products(limit: int = Query(100, le=500), db: Session = Depends(db_session)):
     return [
         {
@@ -306,7 +297,7 @@ def products(limit: int = Query(100, le=500), db: Session = Depends(db_session))
     ]
 
 
-@app.get("/api/v1/customers", dependencies=[Depends(auth)])
+@app.get("/api/v1/customers")
 def customers(limit: int = Query(100, le=500), db: Session = Depends(db_session)):
     return [
         {
@@ -321,12 +312,12 @@ def customers(limit: int = Query(100, le=500), db: Session = Depends(db_session)
     ]
 
 
-@app.get("/api/v1/sellers", dependencies=[Depends(auth)])
+@app.get("/api/v1/sellers")
 def sellers(db: Session = Depends(db_session)):
     return [{"id": x.mercos_id, "name": x.name, "active": x.active} for x in db.scalars(select(Seller))]
 
 
-@app.get("/api/v1/sync/status", dependencies=[Depends(auth)])
+@app.get("/api/v1/sync/status")
 def sync_status(db: Session = Depends(db_session)):
     return [
         {
@@ -341,7 +332,7 @@ def sync_status(db: Session = Depends(db_session)):
     ]
 
 
-@app.get("/api/v1/sync/runs", dependencies=[Depends(require_admin)])
+@app.get("/api/v1/sync/runs")
 def sync_runs(
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100),
@@ -389,7 +380,7 @@ def sync_runs(
     }
 
 
-@app.post("/api/v1/sync/cancel", dependencies=[Depends(require_admin)])
+@app.post("/api/v1/sync/cancel")
 async def cancel_sync():
     global _sync_busy
     request_cancel()
@@ -405,7 +396,7 @@ async def cancel_sync():
     }
 
 
-@app.post("/api/v1/sync/{resource}", dependencies=[Depends(require_admin)])
+@app.post("/api/v1/sync/{resource}")
 async def run_sync(resource: str, background_tasks: BackgroundTasks, full: bool = False):
     global _sync_busy
     if resource != "all" and resource not in SYNC_RESOURCES:

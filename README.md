@@ -30,8 +30,8 @@ Swagger: `http://localhost:8000/docs`.
 
 ## Configuração
 
-Defina `DATABASE_URL`, `TRAY_ADAPTOR_URL`, `TRAY_ADAPTOR_TOKEN`,
-`JWT_SECRET`, `AUTH_ADMIN_PASSWORD` e `CORS_ORIGINS`. O token é o mesmo valor
+Defina `DATABASE_URL`, `TRAY_ADAPTOR_URL`, `TRAY_ADAPTOR_TOKEN` e
+`CORS_ORIGINS`. O token é o mesmo valor
 de `TRAY_ADAPTER_TOKEN` configurado no serviço TrayAdaptor.
 
 ## Primeira carga
@@ -39,8 +39,7 @@ de `TRAY_ADAPTER_TOKEN` configurado no serviço TrayAdaptor.
 Depois de subir o backend e aplicar as migrações:
 
 ```bash
-curl -X POST "https://SEU-BACKEND/api/v1/sync/all?full=true" \
-  -H "X-API-Key: SUA_BI_API_KEY"
+curl -X POST "https://SEU-BACKEND/api/v1/sync/all?full=true"
 ```
 
 Durante a carga, acompanhe `/api/v1/sync/status`. A Tray limita o volume de

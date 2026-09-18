@@ -8,7 +8,6 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 
-from app.auth import AuthUser, require_admin
 from app.database import db_session
 from app.models import ExportRun
 from app.schemas.analytics import AnalyticsFilters
@@ -27,12 +26,11 @@ class ExportRequest(BaseModel):
 @router.post("")
 def export(
     payload: ExportRequest,
-    user: AuthUser = Depends(require_admin),
     db: Session = Depends(db_session),
 ):
     path, content_type, filename, run_id = create_export(
         db,
-        username=user.username,
+        username="public",
         report=payload.report,
         export_format=payload.format,
         filters=payload.filters,
@@ -50,7 +48,6 @@ def export(
 def export_runs(
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100),
-    user: AuthUser = Depends(require_admin),
     db: Session = Depends(db_session),
 ):
     total = int(db.scalar(select(func.count(ExportRun.id))) or 0)

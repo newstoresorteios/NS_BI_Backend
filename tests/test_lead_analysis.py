@@ -9,7 +9,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from app.auth import AuthUser, current_user
 from app.config import Settings
 from app.database import Base, db_session
 from app.main import app
@@ -54,7 +53,6 @@ def crm_session():
 
 def test_lead_analysis_uses_openai_and_caches(crm_session, monkeypatch):
     cfg = Settings(
-        jwt_secret="test-secret-with-enough-entropy",
         openai_api_key="test-key",
         openai_model="gpt-4o-mini",
     )
@@ -78,7 +76,6 @@ def test_lead_analysis_uses_openai_and_caches(crm_session, monkeypatch):
         yield crm_session
 
     app.dependency_overrides[db_session] = override_db
-    app.dependency_overrides[current_user] = lambda: AuthUser(username="admin@xnamai.com", role="admin")
     try:
         with patch("app.services.lead_analysis._call_openai", return_value=analysis):
             with TestClient(app) as client:
@@ -97,8 +94,8 @@ def test_lead_analysis_uses_openai_and_caches(crm_session, monkeypatch):
         app.dependency_overrides.clear()
 
 
-def test_lead_analysis_requires_api_key(crm_session, monkeypatch):
-    cfg = Settings(jwt_secret="test-secret-with-enough-entropy", openai_api_key="")
+def test_lead_analysis_requires_openai_key(crm_session, monkeypatch):
+    cfg = Settings(openai_api_key="")
     monkeypatch.setattr(config_module, "settings", lambda: cfg)
 
     def override_db():

@@ -5,164 +5,6 @@
     "version": "1.0.0"
   },
   "paths": {
-    "/api/v1/auth/login": {
-      "post": {
-        "tags": [
-          "auth"
-        ],
-        "summary": "Login",
-        "operationId": "login_api_v1_auth_login_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LoginRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/auth/refresh": {
-      "post": {
-        "tags": [
-          "auth"
-        ],
-        "summary": "Refresh",
-        "operationId": "refresh_api_v1_auth_refresh_post",
-        "parameters": [
-          {
-            "name": "bi_refresh",
-            "in": "cookie",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Bi Refresh"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/auth/logout": {
-      "post": {
-        "tags": [
-          "auth"
-        ],
-        "summary": "Logout",
-        "operationId": "logout_api_v1_auth_logout_post",
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          }
-        }
-      }
-    },
-    "/api/v1/auth/me": {
-      "get": {
-        "tags": [
-          "auth"
-        ],
-        "summary": "Me",
-        "operationId": "me_api_v1_auth_me_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthUser"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/crm/leads": {
       "get": {
         "tags": [
@@ -507,11 +349,6 @@
         ],
         "summary": "Get Overview",
         "operationId": "get_overview_api_v1_analytics_overview_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "dateFrom",
@@ -839,22 +676,6 @@
               "type": "boolean",
               "default": false,
               "title": "Activeonly"
-            }
-          },
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
             }
           }
         ],
@@ -887,11 +708,6 @@
         ],
         "summary": "Get Timeseries",
         "operationId": "get_timeseries_api_v1_analytics_timeseries_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "dateFrom",
@@ -1219,22 +1035,6 @@
               "type": "boolean",
               "default": false,
               "title": "Activeonly"
-            }
-          },
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
             }
           }
         ],
@@ -1267,11 +1067,6 @@
         ],
         "summary": "Get Breakdowns",
         "operationId": "get_breakdowns_api_v1_analytics_breakdowns_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "dateFrom",
@@ -1599,22 +1394,6 @@
               "type": "boolean",
               "default": false,
               "title": "Activeonly"
-            }
-          },
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
             }
           }
         ],
@@ -1647,11 +1426,6 @@
         ],
         "summary": "Get Rankings",
         "operationId": "get_rankings_api_v1_analytics_rankings_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "dateFrom",
@@ -1980,22 +1754,6 @@
               "default": false,
               "title": "Activeonly"
             }
-          },
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
           }
         ],
         "responses": {
@@ -2027,11 +1785,6 @@
         ],
         "summary": "Get Orders",
         "operationId": "get_orders_api_v1_analytics_orders_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "page",
@@ -2433,22 +2186,6 @@
               "default": false,
               "title": "Activeonly"
             }
-          },
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
           }
         ],
         "responses": {
@@ -2482,11 +2219,6 @@
         ],
         "summary": "Get Order Detail",
         "operationId": "get_order_detail_api_v1_analytics_orders__mercos_id__get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "mercos_id",
@@ -2824,22 +2556,6 @@
               "default": false,
               "title": "Activeonly"
             }
-          },
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
           }
         ],
         "responses": {
@@ -2871,11 +2587,6 @@
         ],
         "summary": "Get Product Insights",
         "operationId": "get_product_insights_api_v1_analytics_product_insights_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "dateFrom",
@@ -3204,22 +2915,6 @@
               "default": false,
               "title": "Activeonly"
             }
-          },
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
           }
         ],
         "responses": {
@@ -3251,11 +2946,6 @@
         ],
         "summary": "Get Products",
         "operationId": "get_products_api_v1_analytics_products_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "page",
@@ -3660,22 +3350,6 @@
               "default": false,
               "title": "Activeonly"
             }
-          },
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
           }
         ],
         "responses": {
@@ -3709,11 +3383,6 @@
         ],
         "summary": "Get Product Detail",
         "operationId": "get_product_detail_api_v1_analytics_products__mercos_id__get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "mercos_id",
@@ -4051,22 +3720,6 @@
               "default": false,
               "title": "Activeonly"
             }
-          },
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
           }
         ],
         "responses": {
@@ -4098,11 +3751,6 @@
         ],
         "summary": "Get Customers",
         "operationId": "get_customers_api_v1_analytics_customers_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "page",
@@ -4509,22 +4157,6 @@
               "default": false,
               "title": "Activeonly"
             }
-          },
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
           }
         ],
         "responses": {
@@ -4558,11 +4190,6 @@
         ],
         "summary": "Get Customer Detail",
         "operationId": "get_customer_detail_api_v1_analytics_customers__mercos_id__get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "mercos_id",
@@ -4900,22 +4527,6 @@
               "default": false,
               "title": "Activeonly"
             }
-          },
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
           }
         ],
         "responses": {
@@ -4947,11 +4558,6 @@
         ],
         "summary": "Get Sellers",
         "operationId": "get_sellers_api_v1_analytics_sellers_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "page",
@@ -5354,22 +4960,6 @@
               "default": false,
               "title": "Activeonly"
             }
-          },
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
           }
         ],
         "responses": {
@@ -5403,11 +4993,6 @@
         ],
         "summary": "Get Seller Detail",
         "operationId": "get_seller_detail_api_v1_analytics_sellers__mercos_id__get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "mercos_id",
@@ -5745,22 +5330,6 @@
               "default": false,
               "title": "Activeonly"
             }
-          },
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
           }
         ],
         "responses": {
@@ -5792,11 +5361,6 @@
         ],
         "summary": "Get Inventory",
         "operationId": "get_inventory_api_v1_analytics_inventory_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "page",
@@ -6201,22 +5765,6 @@
               "default": false,
               "title": "Activeonly"
             }
-          },
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
           }
         ],
         "responses": {
@@ -6250,11 +5798,6 @@
         ],
         "summary": "Get Geography",
         "operationId": "get_geography_api_v1_analytics_geography_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "dateFrom",
@@ -6582,22 +6125,6 @@
               "type": "boolean",
               "default": false,
               "title": "Activeonly"
-            }
-          },
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
             }
           }
         ],
@@ -6630,11 +6157,6 @@
         ],
         "summary": "Get Cohorts",
         "operationId": "get_cohorts_api_v1_analytics_cohorts_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "dateFrom",
@@ -6963,22 +6485,6 @@
               "default": false,
               "title": "Activeonly"
             }
-          },
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
           }
         ],
         "responses": {
@@ -7010,11 +6516,6 @@
         ],
         "summary": "Get Associations",
         "operationId": "get_associations_api_v1_analytics_associations_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "limit",
@@ -7355,22 +6856,6 @@
               "default": false,
               "title": "Activeonly"
             }
-          },
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
           }
         ],
         "responses": {
@@ -7402,11 +6887,6 @@
         ],
         "summary": "Get Price Savings",
         "operationId": "get_price_savings_api_v1_analytics_custom_views_price_savings_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "dateFrom",
@@ -7735,22 +7215,6 @@
               "default": false,
               "title": "Activeonly"
             }
-          },
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
           }
         ],
         "responses": {
@@ -7782,11 +7246,6 @@
         ],
         "summary": "Get Filter Options",
         "operationId": "get_filter_options_api_v1_analytics_filter_options_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "option",
@@ -7867,22 +7326,6 @@
               "default": 50,
               "title": "Page Size"
             }
-          },
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
           }
         ],
         "responses": {
@@ -7914,38 +7357,15 @@
         ],
         "summary": "Export",
         "operationId": "export_api_v1_exports_post",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/ExportRequest"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
@@ -7976,11 +7396,6 @@
         ],
         "summary": "Export Runs",
         "operationId": "export_runs_api_v1_exports_runs_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "page",
@@ -8003,22 +7418,6 @@
               "minimum": 1,
               "default": 25,
               "title": "Page Size"
-            }
-          },
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
             }
           }
         ],
@@ -8068,29 +7467,6 @@
         "summary": "Data Quality",
         "description": "Read-only coverage and integrity audit; never returns raw PII values.",
         "operationId": "data_quality_api_v1_data_quality_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -8098,16 +7474,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/DataQualityResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -8119,11 +7485,6 @@
       "get": {
         "summary": "Get Dashboard",
         "operationId": "get_dashboard_api_v1_dashboard_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "days",
@@ -8135,22 +7496,6 @@
               "minimum": 0,
               "default": 30,
               "title": "Days"
-            }
-          },
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
             }
           }
         ],
@@ -8180,11 +7525,6 @@
       "get": {
         "summary": "Get Rankings",
         "operationId": "get_rankings_api_v1_rankings_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "days",
@@ -8196,22 +7536,6 @@
               "minimum": 0,
               "default": 30,
               "title": "Days"
-            }
-          },
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
             }
           }
         ],
@@ -8241,11 +7565,6 @@
       "get": {
         "summary": "Get Customer Intelligence",
         "operationId": "get_customer_intelligence_api_v1_intelligence_customers_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "inactive_days",
@@ -8329,22 +7648,6 @@
               "default": "asc",
               "title": "Order"
             }
-          },
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
           }
         ],
         "responses": {
@@ -8373,11 +7676,6 @@
       "get": {
         "summary": "Get Leads",
         "operationId": "get_leads_api_v1_intelligence_leads_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "inactive_days",
@@ -8414,22 +7712,6 @@
               "default": 200,
               "title": "Limit"
             }
-          },
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
           }
         ],
         "responses": {
@@ -8458,11 +7740,6 @@
       "get": {
         "summary": "Get Dead Stock",
         "operationId": "get_dead_stock_api_v1_intelligence_dead_stock_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "no_sale_days",
@@ -8486,22 +7763,6 @@
               "minimum": 1,
               "default": 200,
               "title": "Limit"
-            }
-          },
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
             }
           }
         ],
@@ -8531,11 +7792,6 @@
       "get": {
         "summary": "Get Product Movers",
         "operationId": "get_product_movers_api_v1_intelligence_product_movers_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "days",
@@ -8547,22 +7803,6 @@
               "minimum": 0,
               "default": 365,
               "title": "Days"
-            }
-          },
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
             }
           }
         ],
@@ -8592,11 +7832,6 @@
       "get": {
         "summary": "Orders",
         "operationId": "orders_api_v1_orders_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "limit",
@@ -8647,22 +7882,6 @@
               "default": "desc",
               "title": "Order"
             }
-          },
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
           }
         ],
         "responses": {
@@ -8691,11 +7910,6 @@
       "get": {
         "summary": "Get Orders Insight",
         "operationId": "get_orders_insight_api_v1_orders_insight_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "days",
@@ -8719,22 +7933,6 @@
               "minimum": 1,
               "default": 10,
               "title": "Limit"
-            }
-          },
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
             }
           }
         ],
@@ -8764,11 +7962,6 @@
       "get": {
         "summary": "Products",
         "operationId": "products_api_v1_products_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "limit",
@@ -8779,22 +7972,6 @@
               "maximum": 500,
               "default": 100,
               "title": "Limit"
-            }
-          },
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
             }
           }
         ],
@@ -8824,11 +8001,6 @@
       "get": {
         "summary": "Customers",
         "operationId": "customers_api_v1_customers_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "limit",
@@ -8839,22 +8011,6 @@
               "maximum": 500,
               "default": 100,
               "title": "Limit"
-            }
-          },
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
             }
           }
         ],
@@ -8884,45 +8040,12 @@
       "get": {
         "summary": "Sellers",
         "operationId": "sellers_api_v1_sellers_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
               }
             }
           }
@@ -8933,45 +8056,12 @@
       "get": {
         "summary": "Sync Status",
         "operationId": "sync_status_api_v1_sync_status_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
               }
             }
           }
@@ -8982,11 +8072,6 @@
       "get": {
         "summary": "Sync Runs",
         "operationId": "sync_runs_api_v1_sync_runs_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "page",
@@ -9026,22 +8111,6 @@
               ],
               "title": "Resource"
             }
-          },
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
           }
         ],
         "responses": {
@@ -9070,45 +8139,12 @@
       "post": {
         "summary": "Cancel Sync",
         "operationId": "cancel_sync_api_v1_sync_cancel_post",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
               }
             }
           }
@@ -9119,11 +8155,6 @@
       "post": {
         "summary": "Run Sync",
         "operationId": "run_sync_api_v1_sync__resource__post",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "resource",
@@ -9142,22 +8173,6 @@
               "type": "boolean",
               "default": false,
               "title": "Full"
-            }
-          },
-          {
-            "name": "x-api-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
             }
           }
         ],
@@ -9396,55 +8411,6 @@
           "isPartial"
         ],
         "title": "AnalyticsMetadata"
-      },
-      "AuthResponse": {
-        "properties": {
-          "accessToken": {
-            "type": "string",
-            "title": "Accesstoken"
-          },
-          "tokenType": {
-            "type": "string",
-            "title": "Tokentype",
-            "default": "bearer"
-          },
-          "expiresIn": {
-            "type": "integer",
-            "title": "Expiresin"
-          },
-          "user": {
-            "$ref": "#/components/schemas/AuthUser"
-          }
-        },
-        "type": "object",
-        "required": [
-          "accessToken",
-          "expiresIn",
-          "user"
-        ],
-        "title": "AuthResponse"
-      },
-      "AuthUser": {
-        "properties": {
-          "username": {
-            "type": "string",
-            "title": "Username"
-          },
-          "role": {
-            "type": "string",
-            "enum": [
-              "admin",
-              "viewer"
-            ],
-            "title": "Role"
-          }
-        },
-        "type": "object",
-        "required": [
-          "username",
-          "role"
-        ],
-        "title": "AuthUser"
       },
       "ClaimRequest": {
         "properties": {
@@ -9770,24 +8736,6 @@
         ],
         "title": "IntegrityMetrics"
       },
-      "LoginRequest": {
-        "properties": {
-          "username": {
-            "type": "string",
-            "title": "Username"
-          },
-          "password": {
-            "type": "string",
-            "title": "Password"
-          }
-        },
-        "type": "object",
-        "required": [
-          "username",
-          "password"
-        ],
-        "title": "LoginRequest"
-      },
       "PageResponse": {
         "properties": {
           "items": {
@@ -9992,12 +8940,6 @@
           "type"
         ],
         "title": "ValidationError"
-      }
-    },
-    "securitySchemes": {
-      "HTTPBearer": {
-        "type": "http",
-        "scheme": "bearer"
       }
     }
   }

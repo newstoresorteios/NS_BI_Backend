@@ -7,7 +7,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 
 class ApiRateLimitMiddleware(BaseHTTPMiddleware):
-    """Small single-instance guard; login also has a stricter dedicated limit."""
+    """Small single-instance request-rate guard."""
 
     def __init__(self, app, requests_per_minute: int = 300):
         super().__init__(app)

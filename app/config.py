@@ -51,16 +51,6 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./bi.db"
     tray_adaptor_url: str = ""
     tray_adaptor_token: str = ""
-    bi_api_key: str = "change-me"
-    jwt_secret: str = "change-me-in-production"
-    auth_admin_username: str = "admin@newstore.com.br"
-    auth_admin_password: str = "123456"
-    auth_viewer_username: str = "viewer"
-    auth_viewer_password: str = ""
-    auth_access_minutes: int = 15
-    auth_refresh_days: int = 7
-    auth_cookie_secure: bool = True
-    auth_cookie_samesite: str = "none"
     cors_origins: str = "http://localhost:5173,https://ns-bi-frontend.vercel.app"
     sync_orders_minutes: int = 10
     sync_catalog_hours: int = 6
@@ -79,14 +69,6 @@ class Settings(BaseSettings):
         if not isinstance(value, str) or not value.strip():
             return "http://localhost:5173,https://ns-bi-frontend.vercel.app"
         return value.strip().strip('"').strip("'")
-
-    @field_validator("auth_cookie_samesite")
-    @classmethod
-    def validate_cookie_samesite(cls, value: str) -> str:
-        normalized = value.lower()
-        if normalized not in {"lax", "strict", "none"}:
-            raise ValueError("AUTH_COOKIE_SAMESITE deve ser lax, strict ou none")
-        return normalized
 
     @property
     def origins(self):

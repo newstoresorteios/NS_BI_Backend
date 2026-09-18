@@ -7,7 +7,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from app.auth import AuthUser, current_user
 from app.database import Base, db_session
 from app.main import app
 from app.models import Customer, Order, OrderItem, Product, Seller
@@ -60,10 +59,6 @@ def http_client():
         yield session
 
     app.dependency_overrides[db_session] = override_db
-    app.dependency_overrides[current_user] = lambda: AuthUser(
-        username="admin",
-        role="admin",
-    )
     with TestClient(app) as client:
         yield client
     app.dependency_overrides.clear()
@@ -125,11 +120,3 @@ def test_analytics_http_contracts_cover_pages_charts_and_drilldowns(http_client)
         response = http_client.get(path + query)
         assert response.status_code == 200, response.text
         assert entity_key in response.json()
-
-
-def test_analytics_requires_credentials(http_client):
-    app.dependency_overrides.pop(current_user)
-
-    response = http_client.get("/api/v1/analytics/overview?period=all")
-
-    assert response.status_code == 401
