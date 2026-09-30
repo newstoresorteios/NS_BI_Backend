@@ -557,7 +557,11 @@ class Adaptor:
         cursor_prefix = "tray-page:"
         if resource == "orders-history":
             params["sort"] = "id_asc"
-            params["date"] = f"{history_range[0]},{history_range[1]}"
+            # Tray treats a date range as timestamps.  Make the upper bound
+            # inclusive so orders created during the final day are not lost.
+            params["date"] = (
+                f"{history_range[0]},{history_range[1]} 23:59:59"
+            )
             cursor_prefix = ORDER_HISTORY_CURSOR_PREFIX
         elif resource in {"orders", "customers"}:
             params["sort"] = "id_desc"

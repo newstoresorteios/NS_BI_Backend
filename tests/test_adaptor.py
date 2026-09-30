@@ -98,7 +98,7 @@ async def test_order_history_uses_explicit_date_range_and_resumable_page(monkeyp
             "page": 3,
             "limit": 10,
             "sort": "id_asc",
-            "date": "2025-01-01,2026-09-30",
+            "date": "2025-01-01,2026-09-30 23:59:59",
         }
         return {
             "paging": {"total": 40, "page": 3, "limit": 10},
