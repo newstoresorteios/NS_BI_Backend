@@ -23,6 +23,7 @@ from app.analytics import (
     rankings,
 )
 from app.config import settings
+from app import history
 from app.database import Base, SessionLocal, db_session, engine
 from app.middleware.rate_limit import ApiRateLimitMiddleware
 from app.models import Customer, Order, Product, Seller, SyncRun, SyncState
@@ -131,6 +132,11 @@ async def lifespan(app):
             coalesce=True,
         )
         scheduler.start()
+        scheduler.add_job(
+            history.resume, "interval", minutes=60,
+            id="recover_order_history", replace_existing=True,
+            max_instances=1, coalesce=True,
+        )
         log.info(
             "Scheduler started (orders every %sm, catalog every %sh, adaptor ping every 8m)",
             cfg.sync_orders_minutes,
@@ -451,6 +457,26 @@ async def probe_orders(
             for row in payload.get("orders", [])
         ],
     }
+
+
+@app.post("/api/v1/sync/orders-history-ids")
+async def recover_order_history(
+    background_tasks: BackgroundTasks,
+    first_id: int = Query(1, ge=1),
+    last_id: int = Query(..., ge=1, le=10000000),
+    reset: bool = False,
+):
+    if first_id > last_id:
+        raise HTTPException(422, "first_id deve ser menor ou igual a last_id")
+    if await asyncio.to_thread(active_sync_resources):
+        raise HTTPException(409, "Outra sincronização está em andamento")
+    cursor = await asyncio.to_thread(history.prepare, first_id, last_id, reset)
+    clear_cancel()
+    background_tasks.add_task(history.resume)
+    return {"status": "started", "resource": ORDER_HISTORY_RESOURCE,
+            "cursor": cursor, "batchAttempts": history.BATCH_ATTEMPTS,
+            "dailyAttemptLimit": history.DAILY_ATTEMPTS,
+            "resumeEveryMinutes": 60}
 
 
 @app.post("/api/v1/sync/cancel")

@@ -1271,6 +1271,12 @@ async def sync_all(full=False, *, raise_http=True):
 
 
 async def sync_orders_job():
+    from app import history
+
+    if await asyncio.to_thread(history.pending):
+        result = await history.resume()
+        if result.get("status") not in {"idle", "quota_wait"}:
+            return result
     await _run_resource_sequence(ORDER_SYNC_RESOURCES, False)
 
 
