@@ -2,6 +2,7 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from typing import Literal
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
@@ -410,6 +411,8 @@ async def probe_orders(
     order_id: int | None = Query(None, gt=0),
     page: int = Query(1, ge=1),
     descending: bool = False,
+    filter_by: Literal["date", "modified", "created", "createdStart", "lastModifiedStart"] = "date",
+    list_id: int | None = Query(None, gt=0),
 ):
     """Read-only, bounded diagnostics; never return customer data or credentials."""
     params = {"page": page, "limit": 10, "sort": "id_desc" if descending else "id_asc"}
@@ -421,7 +424,13 @@ async def probe_orders(
             raise HTTPException(422, "Use start e end no formato YYYY-MM-DD") from exc
         if first > last:
             raise HTTPException(422, "Intervalo inválido")
-        params["date"] = f"{first.isoformat()},{last.isoformat()} 23:59:59"
+        if filter_by.endswith("Start"):
+            params[filter_by] = first.isoformat()
+            params[filter_by.replace("Start", "End")] = f"{last.isoformat()} 23:59:59"
+        else:
+            params[filter_by] = f"{first.isoformat()},{last.isoformat()} 23:59:59"
+    if list_id:
+        params["id"] = list_id
     if order_id:
         basic = await adaptor._get(f"/internal/orders/{order_id}", retries=1)
         complete = await adaptor._get(f"/internal/orders/{order_id}/complete", retries=1)
@@ -436,6 +445,7 @@ async def probe_orders(
     return {
         "query": params,
         "paging": payload.get("paging", {}),
+        "filterSupport": payload.get("filter_support", {}),
         "orders": [
             {key: row.get(key) for key in ("id", "date", "created", "modified")}
             for row in payload.get("orders", [])
