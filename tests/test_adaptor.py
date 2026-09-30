@@ -129,6 +129,7 @@ async def test_order_detail_complements_header_when_complete_only_has_items(monk
         calls.append(path)
         if path.endswith("/complete"):
             return {
+                "order": {"id": 17128, "status": "FINALIZADO"},
                 "products": [
                     {"product_id": 10, "name": "Produto", "quantity": 1, "price": 20}
                 ]

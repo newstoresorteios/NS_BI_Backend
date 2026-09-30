@@ -671,14 +671,7 @@ class Adaptor:
                 f"/internal/orders/{safe_id}", retries=retries
             )
         detail = _order_detail(payload, str(source_id))
-        header_fields = {
-            "data_emissao",
-            "data_criacao",
-            "ultima_alteracao",
-            "cliente_id",
-            "status_tray",
-        }
-        if not any(field in detail for field in header_fields):
+        if not detail.get("data_emissao") or not detail.get("cliente_id"):
             basic_payload = await self._get(
                 f"/internal/orders/{safe_id}", retries=retries
             )

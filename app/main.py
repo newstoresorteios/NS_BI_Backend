@@ -30,7 +30,7 @@ from app.routers.crm import router as crm_router
 from app.routers.exports import router as exports_router
 from app.schemas.data_quality import DataQualityResponse
 from app.services.data_quality import build_data_quality_report
-from app.adaptor import clear_cancel, keep_adaptor_warm, request_cancel
+from app.adaptor import adaptor, clear_cancel, keep_adaptor_warm, request_cancel
 from app.sync import (
     ORDER_HISTORY_RESOURCE,
     SYNC_LEASE_TTL,
@@ -400,6 +400,46 @@ def sync_runs(
         "sort": "startedAt",
         "order": "desc",
         "appliedFilters": {"resource": resource} if resource else {},
+    }
+
+
+@app.get("/api/v1/sync/orders-probe")
+async def probe_orders(
+    start: str | None = Query(None),
+    end: str | None = Query(None),
+    order_id: int | None = Query(None, gt=0),
+    page: int = Query(1, ge=1),
+    descending: bool = False,
+):
+    """Read-only, bounded diagnostics; never return customer data or credentials."""
+    params = {"page": page, "limit": 10, "sort": "id_desc" if descending else "id_asc"}
+    if start or end:
+        try:
+            first = datetime.strptime(start or "", "%Y-%m-%d").date()
+            last = datetime.strptime(end or "", "%Y-%m-%d").date()
+        except ValueError as exc:
+            raise HTTPException(422, "Use start e end no formato YYYY-MM-DD") from exc
+        if first > last:
+            raise HTTPException(422, "Intervalo inválido")
+        params["date"] = f"{first.isoformat()},{last.isoformat()} 23:59:59"
+    if order_id:
+        basic = await adaptor._get(f"/internal/orders/{order_id}", retries=0)
+        complete = await adaptor._get(f"/internal/orders/{order_id}/complete", retries=0)
+        return {
+            "basic": {key: basic.get("order", {}).get(key) for key in ("id", "date", "created", "modified")},
+            "complete": {key: complete.get("order", {}).get(key) for key in ("id", "date", "created", "modified")},
+            "basicFields": sorted(basic.get("order", {})),
+            "completeFields": sorted(complete.get("order", {})),
+            "items": len(complete.get("products", [])),
+        }
+    payload = await adaptor._get("/internal/orders", params=params, retries=0)
+    return {
+        "query": params,
+        "paging": payload.get("paging", {}),
+        "orders": [
+            {key: row.get(key) for key in ("id", "date", "created", "modified")}
+            for row in payload.get("orders", [])
+        ],
     }
 
 
