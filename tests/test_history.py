@@ -27,13 +27,13 @@ async def test_recovers_missing_skips_existing_and_advances_past_404(db_factory,
         db.add(Order(mercos_id="3", number="3", status="order", total=90, issued_at=datetime(2025, 1, 1, tzinfo=timezone.utc)))
         db.commit()
     calls = []
-    async def fetch(path, *, retries):
+    async def fetch(self, path, *, retries):
         calls.append(path)
         assert retries == 1
         if "/1/" in path:
             raise HTTPException(404, "Not found")
         return {"order": {"id": 2, "date": "2020-01-01", "total": 20}, "products": []}
-    monkeypatch.setattr(history.adaptor, "_get", fetch)
+    monkeypatch.setattr(type(history.adaptor), "_get", fetch)
     history.prepare(1, 3)
     result = await history.resume()
     assert result["status"] == "success"
@@ -52,9 +52,9 @@ async def test_recovers_missing_skips_existing_and_advances_past_404(db_factory,
 @pytest.mark.asyncio
 @pytest.mark.parametrize("code,status", [(429, "partial"), (403, "interrupted"), (500, "interrupted")])
 async def test_errors_never_skip_identifier(db_factory, monkeypatch, code, status):
-    async def fetch(path, *, retries):
+    async def fetch(self, path, *, retries):
         raise HTTPException(code, "Error")
-    monkeypatch.setattr(history.adaptor, "_get", fetch)
+    monkeypatch.setattr(type(history.adaptor), "_get", fetch)
     initial = history.prepare(1, 2)
     result = await history.resume()
     assert result["status"] == status
@@ -64,9 +64,9 @@ async def test_errors_never_skip_identifier(db_factory, monkeypatch, code, statu
 
 @pytest.mark.asyncio
 async def test_contract_error_does_not_create_empty_order(db_factory, monkeypatch):
-    async def fetch(path, *, retries):
+    async def fetch(self, path, *, retries):
         return {"order": {}, "products": []}
-    monkeypatch.setattr(history.adaptor, "_get", fetch)
+    monkeypatch.setattr(type(history.adaptor), "_get", fetch)
     initial = history.prepare(1, 1)
     result = await history.resume()
     assert result["status"] == "interrupted"
