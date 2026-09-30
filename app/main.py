@@ -488,7 +488,12 @@ async def run_sync(
                 await sync_all(False, raise_http=False)
             elif resource == "orders":
                 if reset:
-                    await sync_resource("orders", False, raise_http=False)
+                    await sync_resource(
+                        "orders",
+                        False,
+                        raise_http=False,
+                        hydrate_details=False,
+                    )
                 else:
                     await sync_orders_job()
             elif resource == ORDER_HISTORY_RESOURCE:

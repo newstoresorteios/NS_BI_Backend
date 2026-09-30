@@ -994,7 +994,13 @@ def _finish_sync_run(
         }
 
 
-async def sync_resource(resource: str, full=False, *, raise_http=True):
+async def sync_resource(
+    resource: str,
+    full=False,
+    *,
+    raise_http=True,
+    hydrate_details: bool = True,
+):
     # Short DB sessions only — never hold a pooler connection during Tray HTTP waits.
     # A missing cursor already performs the required initial import. Afterwards
     # every execution must resume from the committed checkpoint. Old clients may
@@ -1030,7 +1036,7 @@ async def sync_resource(resource: str, full=False, *, raise_http=True):
             if not rows:
                 break
             received += len(rows)
-            if resource in {"orders", ORDER_HISTORY_RESOURCE}:
+            if hydrate_details and resource in {"orders", ORDER_HISTORY_RESOURCE}:
                 details_needed = sum(
                     1 for row in rows if _order_line_items(row) is None
                 )
@@ -1105,7 +1111,7 @@ async def sync_resource(resource: str, full=False, *, raise_http=True):
             )
             return {**snapshot, "records": persisted, "status": "partial"}
 
-        if resource in {"orders", ORDER_HISTORY_RESOURCE}:
+        if hydrate_details and resource in {"orders", ORDER_HISTORY_RESOURCE}:
             details_consulted += await _backfill_missing_order_details()
 
         snapshot = await asyncio.to_thread(
