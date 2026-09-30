@@ -235,7 +235,13 @@ async def _hydrate_order_details(rows: list[dict]) -> list[dict]:
         try:
             detail = await adaptor.detail("orders", mercos_id)
         except HTTPException as exc:
-            if exc.status_code in {401, 403, 404}:
+            if exc.status_code == 404:
+                log.warning(
+                    "Pedido Tray %s não encontrado durante hidratação; ignorando",
+                    mercos_id,
+                )
+                continue
+            if exc.status_code in {401, 403}:
                 _order_detail_blocked = True
                 log.warning(
                     "Detalhe do pedido %s indisponível (%s); seguindo com a listagem",

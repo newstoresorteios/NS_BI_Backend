@@ -320,6 +320,11 @@ def _raw_entity(row: dict) -> dict:
     return dict(row)
 
 
+def _sold_order_stub(row: dict) -> dict:
+    """Reduce a sold-product row to the order identifier used for hydration."""
+    return {"id": row.get("order_id")}
+
+
 def _order_header(row: dict) -> dict:
     address = row.get("customer_address") or row.get("CustomerAddress") or {}
     if isinstance(address, list):
@@ -548,20 +553,16 @@ class Adaptor:
             )
             base_since = None
             history_range = (start_date, end_date)
+            path = "/internal/products-sold"
+            key = "sold_products"
+            normalizer = _sold_order_stub
         else:
             page, base_since, accumulated_watermark = _decode_cursor(cursor)
-        page_size = (
-            ORDER_PAGE_SIZE if resource in {"orders", "orders-history"} else PAGE_SIZE
-        )
+        page_size = ORDER_PAGE_SIZE if resource == "orders" else PAGE_SIZE
         params: dict[str, object] = {"page": page, "limit": page_size}
         cursor_prefix = "tray-page:"
         if resource == "orders-history":
             params["sort"] = "id_asc"
-            # Tray treats a date range as timestamps.  Make the upper bound
-            # inclusive so orders created during the final day are not lost.
-            params["modified"] = (
-                f"{history_range[0]},{history_range[1]} 23:59:59"
-            )
             cursor_prefix = ORDER_HISTORY_CURSOR_PREFIX
         elif resource in {"orders", "customers"}:
             params["sort"] = "id_desc"
@@ -590,6 +591,16 @@ class Adaptor:
             for row in source_rows
             if isinstance(row, dict) and row.get("id") is not None
         ]
+        if resource == "orders-history":
+            # Several products from one order can share a source page.  Hydrate
+            # each order only once while preserving its first-seen order.
+            rows = list(
+                {
+                    str(row["id"]): row
+                    for row in rows
+                    if row.get("id") is not None
+                }.values()
+            )
         paging = (
             payload.get("paging") if isinstance(payload.get("paging"), dict) else {}
         )
@@ -649,9 +660,16 @@ class Adaptor:
         if resource != "orders":
             raise HTTPException(404, f"Detalhe Tray não suportado: {resource}")
         safe_id = quote(str(source_id), safe="")
-        payload = await self._get(
-            f"/internal/orders/{safe_id}/complete", retries=retries
-        )
+        try:
+            payload = await self._get(
+                f"/internal/orders/{safe_id}/complete", retries=retries
+            )
+        except HTTPException as exc:
+            if exc.status_code != 404:
+                raise
+            payload = await self._get(
+                f"/internal/orders/{safe_id}", retries=retries
+            )
         return _order_detail(payload, str(source_id))
 
     async def health(self):
