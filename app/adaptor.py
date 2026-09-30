@@ -670,7 +670,23 @@ class Adaptor:
             payload = await self._get(
                 f"/internal/orders/{safe_id}", retries=retries
             )
-        return _order_detail(payload, str(source_id))
+        detail = _order_detail(payload, str(source_id))
+        header_fields = {
+            "data_emissao",
+            "data_criacao",
+            "ultima_alteracao",
+            "cliente_id",
+            "status_tray",
+        }
+        if not any(field in detail for field in header_fields):
+            basic_payload = await self._get(
+                f"/internal/orders/{safe_id}", retries=retries
+            )
+            basic = _order_detail(basic_payload, str(source_id))
+            if "itens" in detail:
+                basic["itens"] = detail["itens"]
+            detail = {**detail, **basic, "id": str(source_id)}
+        return detail
 
     async def health(self):
         cfg = settings()

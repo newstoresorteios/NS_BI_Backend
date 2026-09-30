@@ -122,6 +122,41 @@ async def test_order_history_uses_explicit_date_range_and_resumable_page(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_order_detail_complements_header_when_complete_only_has_items(monkeypatch):
+    calls = []
+
+    async def fake_get(self, path, *, params=None, retries=8):
+        calls.append(path)
+        if path.endswith("/complete"):
+            return {
+                "products": [
+                    {"product_id": 10, "name": "Produto", "quantity": 1, "price": 20}
+                ]
+            }
+        return {
+            "order": {
+                "id": 17128,
+                "date": "2025-04-10",
+                "customer_id": 99,
+                "status": "FINALIZADO",
+                "total": "20.00",
+            }
+        }
+
+    monkeypatch.setattr(Adaptor, "_get", fake_get)
+
+    result = await Adaptor().detail("orders", "17128")
+
+    assert calls == [
+        "/internal/orders/17128/complete",
+        "/internal/orders/17128",
+    ]
+    assert result["data_emissao"] == "2025-04-10"
+    assert result["cliente_id"] == 99
+    assert result["itens"][0]["produto_id"] == 10
+
+
+@pytest.mark.asyncio
 async def test_customer_preserves_complete_registration(monkeypatch):
     async def fake_get(self, path, *, params=None, retries=8):
         assert path == "/internal/customers"
