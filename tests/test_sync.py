@@ -229,9 +229,7 @@ async def test_customer_sync_stores_complete_contacts_and_links_addresses(
             "11999999999",
             "1133334444",
         ]
-        assert customer.emails == [
-            {"email": "lead@example.com", "principal": True}
-        ]
+        assert customer.emails == [{"email": "lead@example.com", "principal": True}]
         assert customer.contact_profile["observation"] == "Contato comercial"
         assert any(item.get("id") == "address-1" for item in customer.addresses)
         assert customer.raw["tray"]["credit_limit"] == "5000.00"
@@ -239,6 +237,62 @@ async def test_customer_sync_stores_complete_contacts_and_links_addresses(
             item.get("customer_id") == "customer-1"
             for item in customer.raw["customer_addresses"]
         )
+
+
+@pytest.mark.asyncio
+async def test_customer_sync_discards_non_uf_anonymized_state(sync_db, monkeypatch):
+    class AnonymizedCustomerAdaptor:
+        async def list(self, resource: str, cursor: str | None):
+            return {
+                "data": [
+                    {
+                        "id": "12735",
+                        "nome": "Anonimizado",
+                        "estado": "Anonimizado",
+                    }
+                ],
+                "nextCursor": None,
+            }
+
+    monkeypatch.setattr(sync, "adaptor", AnonymizedCustomerAdaptor())
+
+    result = await sync.sync_resource("customers")
+
+    assert result["status"] == "success"
+    with sync_db() as db:
+        assert db.scalar(select(Customer)).state is None
+
+
+@pytest.mark.asyncio
+async def test_historical_orders_use_order_upsert_and_resume_cursor(
+    sync_db, monkeypatch
+):
+    seen: list[str | None] = []
+
+    class HistoricalAdaptor(SuccessfulAdaptor):
+        async def list(self, resource: str, cursor: str | None):
+            assert resource == sync.ORDER_HISTORY_RESOURCE
+            seen.append(cursor)
+            return await super().list("orders", cursor)
+
+    with sync_db() as db:
+        db.add(
+            SyncState(
+                resource=sync.ORDER_HISTORY_RESOURCE,
+                status="interrupted",
+                cursor="tray-order-history-page:2:2025-01-01|2026-09-30|",
+            )
+        )
+        db.commit()
+    monkeypatch.setattr(sync, "adaptor", HistoricalAdaptor())
+
+    result = await sync.sync_resource(sync.ORDER_HISTORY_RESOURCE)
+
+    assert result["status"] == "success"
+    assert seen == ["tray-order-history-page:2:2025-01-01|2026-09-30|"]
+    with sync_db() as db:
+        assert db.scalar(select(func.count(Order.id))) == 1
+        assert db.scalar(select(func.count(OrderItem.id))) == 2
 
 
 @pytest.mark.asyncio
@@ -348,7 +402,7 @@ class ListWithItemsAdaptor:
                             "preco_liquido": "1.000,00",
                             "subtotal": "100.000,00",
                             "excluido": True,
-                        }
+                        },
                     ],
                 }
             ],
@@ -357,7 +411,9 @@ class ListWithItemsAdaptor:
         }
 
     async def detail(self, resource: str, mercos_id: str):
-        raise AssertionError("Detalhe não deve ser consultado quando a lista contém itens")
+        raise AssertionError(
+            "Detalhe não deve ser consultado quando a lista contém itens"
+        )
 
 
 @pytest.mark.asyncio
@@ -595,7 +651,9 @@ async def test_claim_blocks_other_resources_while_one_is_running(sync_db, monkey
 
     class UnexpectedAdaptor:
         async def list(self, resource: str, cursor: str | None):
-            raise AssertionError("Mercos must stay idle while another resource is syncing")
+            raise AssertionError(
+                "Mercos must stay idle while another resource is syncing"
+            )
 
     monkeypatch.setattr(sync, "adaptor", UnexpectedAdaptor())
     result = await sync.sync_resource("categories")

@@ -32,10 +32,12 @@ from app.schemas.data_quality import DataQualityResponse
 from app.services.data_quality import build_data_quality_report
 from app.adaptor import clear_cancel, keep_adaptor_warm, request_cancel
 from app.sync import (
+    ORDER_HISTORY_RESOURCE,
     SYNC_LEASE_TTL,
     SYNC_RESOURCES,
     active_sync_resources,
     interrupt_running_syncs,
+    prepare_order_history_sync,
     sync_all,
     sync_catalog_job,
     sync_orders_job,
@@ -69,7 +71,9 @@ async def lifespan(app):
         stale_resources = {state.resource for state in stuck}
         for state in stuck:
             state.status = "interrupted"
-            state.error = "Serviço reiniciou durante a sync — use Sincronizar para continuar"
+            state.error = (
+                "Serviço reiniciou durante a sync — use Sincronizar para continuar"
+            )
             state.lease_token = None
             db.add(state)
         stuck_runs = (
@@ -182,12 +186,16 @@ def data_quality(db: Session = Depends(db_session)):
 
 
 @app.get("/api/v1/dashboard")
-def get_dashboard(days: int = Query(30, ge=0, le=3650), db: Session = Depends(db_session)):
+def get_dashboard(
+    days: int = Query(30, ge=0, le=3650), db: Session = Depends(db_session)
+):
     return dashboard(db, days)
 
 
 @app.get("/api/v1/rankings")
-def get_rankings(days: int = Query(30, ge=0, le=3650), db: Session = Depends(db_session)):
+def get_rankings(
+    days: int = Query(30, ge=0, le=3650), db: Session = Depends(db_session)
+):
     return rankings(db, days)
 
 
@@ -196,8 +204,13 @@ def get_customer_intelligence(
     inactive_days: int = Query(90, ge=14, le=730),
     risk_days: int = Query(90, ge=7, le=365),
     limit: int = Query(500, ge=1, le=5000),
-    segment: str | None = Query(None, description="todos|ativo|em_risco|recuperar|lead_novo"),
-    sort: str | None = Query(None, description="name|orders|revenue|ticketAverage|lastOrderAt|daysSinceLastOrder|..."),
+    segment: str | None = Query(
+        None, description="todos|ativo|em_risco|recuperar|lead_novo"
+    ),
+    sort: str | None = Query(
+        None,
+        description="name|orders|revenue|ticketAverage|lastOrderAt|daysSinceLastOrder|...",
+    ),
     order: str = Query("asc", pattern="^(asc|desc)$"),
     db: Session = Depends(db_session),
 ):
@@ -219,7 +232,9 @@ def get_leads(
     limit: int = Query(200, ge=1, le=2000),
     db: Session = Depends(db_session),
 ):
-    return leads_to_recover(db, inactive_days=inactive_days, risk_days=risk_days, limit=limit)
+    return leads_to_recover(
+        db, inactive_days=inactive_days, risk_days=risk_days, limit=limit
+    )
 
 
 @app.get("/api/v1/intelligence/dead-stock")
@@ -232,7 +247,9 @@ def get_dead_stock(
 
 
 @app.get("/api/v1/intelligence/product-movers")
-def get_product_movers(days: int = Query(365, ge=0, le=3650), db: Session = Depends(db_session)):
+def get_product_movers(
+    days: int = Query(365, ge=0, le=3650), db: Session = Depends(db_session)
+):
     return product_movers(db, days=days)
 
 
@@ -263,7 +280,9 @@ def orders(
             "id": x.mercos_id,
             "number": x.number,
             "customerId": x.customer_mercos_id,
-            "customerName": customers.get(x.customer_mercos_id) or x.customer_mercos_id or "—",
+            "customerName": customers.get(x.customer_mercos_id)
+            or x.customer_mercos_id
+            or "—",
             "sellerId": x.seller_mercos_id,
             "sellerName": sellers.get(x.seller_mercos_id) or x.seller_mercos_id or "—",
             "status": x.status,
@@ -315,7 +334,10 @@ def customers(limit: int = Query(100, le=500), db: Session = Depends(db_session)
 
 @app.get("/api/v1/sellers")
 def sellers(db: Session = Depends(db_session)):
-    return [{"id": x.mercos_id, "name": x.name, "active": x.active} for x in db.scalars(select(Seller))]
+    return [
+        {"id": x.mercos_id, "name": x.name, "active": x.active}
+        for x in db.scalars(select(Seller))
+    ]
 
 
 @app.get("/api/v1/sync/status")
@@ -342,9 +364,7 @@ def sync_runs(
     db: Session = Depends(db_session),
 ):
     filters = [SyncRun.resource == resource] if resource else []
-    total = int(
-        db.scalar(select(func.count(SyncRun.id)).where(*filters)) or 0
-    )
+    total = int(db.scalar(select(func.count(SyncRun.id)).where(*filters)) or 0)
     rows = db.scalars(
         select(SyncRun)
         .where(*filters)
@@ -399,10 +419,30 @@ async def cancel_sync():
 
 
 @app.post("/api/v1/sync/{resource}")
-async def run_sync(resource: str, background_tasks: BackgroundTasks, full: bool = False):
+async def run_sync(
+    resource: str,
+    background_tasks: BackgroundTasks,
+    full: bool = False,
+    start: str | None = Query(None),
+    end: str | None = Query(None),
+    reset: bool = Query(False),
+):
     global _sync_busy
-    if resource != "all" and resource not in SYNC_RESOURCES:
+    if resource != "all" and resource not in (*SYNC_RESOURCES, ORDER_HISTORY_RESOURCE):
         raise HTTPException(404, "Recurso inválido")
+
+    start_date = None
+    end_date = None
+    if resource == ORDER_HISTORY_RESOURCE:
+        try:
+            start_date = datetime.strptime(start or "", "%Y-%m-%d").date()
+            end_date = datetime.strptime(end or "", "%Y-%m-%d").date()
+        except ValueError as exc:
+            raise HTTPException(422, "Use start e end no formato YYYY-MM-DD") from exc
+        if start_date > end_date:
+            raise HTTPException(422, "start deve ser anterior ou igual a end")
+        if (end_date - start_date).days > 3660:
+            raise HTTPException(422, "Intervalo histórico máximo de 10 anos")
 
     running_resources = await asyncio.to_thread(active_sync_resources)
     running = bool(running_resources)
@@ -418,6 +458,23 @@ async def run_sync(resource: str, background_tasks: BackgroundTasks, full: bool 
             },
         )
 
+    if resource == ORDER_HISTORY_RESOURCE:
+        prepared = await asyncio.to_thread(
+            prepare_order_history_sync,
+            start_date.isoformat(),
+            end_date.isoformat(),
+            reset=reset,
+        )
+        if prepared["status"] == "running":
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "status": "running",
+                    "message": "Carga histórica já está em andamento",
+                    "resource": resource,
+                },
+            )
+
     _sync_busy = True
     clear_cancel()
 
@@ -428,6 +485,8 @@ async def run_sync(resource: str, background_tasks: BackgroundTasks, full: bool 
                 await sync_all(False, raise_http=False)
             elif resource == "orders":
                 await sync_orders_job()
+            elif resource == ORDER_HISTORY_RESOURCE:
+                await sync_resource(resource, False, raise_http=False)
             else:
                 await sync_resource(resource, False, raise_http=False)
         finally:
@@ -442,6 +501,13 @@ async def run_sync(resource: str, background_tasks: BackgroundTasks, full: bool 
             "message": "Sync iniciada em background. Acompanhe em /api/v1/sync/status",
             "resource": resource,
             "full": False,
-            "mode": "incremental",
+            "mode": "historical"
+            if resource == ORDER_HISTORY_RESOURCE
+            else "incremental",
+            "range": (
+                {"start": start_date.isoformat(), "end": end_date.isoformat()}
+                if resource == ORDER_HISTORY_RESOURCE
+                else None
+            ),
         },
     )

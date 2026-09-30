@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 from fastapi import HTTPException
 from sqlalchemy import delete, func, select, text
 
-from app.adaptor import adaptor
+from app.adaptor import adaptor, order_history_cursor
 from app.database import SessionLocal
 from app.domain.order_status import VALID_SALE_STATUSES, status_sql_in
 from app.models import (
@@ -82,6 +82,7 @@ RAW_ENTITY_RESOURCES = OPTIONAL_CATALOG_RESOURCES - {"categories", "users"}
 # Keep financial data fresh before starting the slower catalog resources.
 SYNC_RESOURCES = ("orders", *CATALOG_RESOURCES)
 ORDER_SYNC_RESOURCES = ("customers", "customer-addresses", "orders")
+ORDER_HISTORY_RESOURCE = "orders-history"
 
 
 class OrderDetailBatchError(Exception):
@@ -120,7 +121,9 @@ def f(value):
         try:
             number = Decimal(text)
         except (InvalidOperation, ValueError, TypeError) as exc:
-            raise ValueError(f"Valor numérico inválido recebido da fonte: {value!r}") from exc
+            raise ValueError(
+                f"Valor numérico inválido recebido da fonte: {value!r}"
+            ) from exc
     if not number.is_finite():
         raise ValueError(f"Valor numérico não finito recebido da fonte: {value!r}")
     return number
@@ -181,7 +184,9 @@ def _customer_addresses(row: dict) -> list[dict]:
         "zip_code": row.get("cep"),
         "primary": True,
     }
-    if any(value not in (None, "") for key, value in primary.items() if key != "primary"):
+    if any(
+        value not in (None, "") for key, value in primary.items() if key != "primary"
+    ):
         result.insert(0, primary)
     return result
 
@@ -195,6 +200,11 @@ def _merge_customer_address(existing: list | None, address: dict) -> list[dict]:
         return values
     values.append(dict(address))
     return values
+
+
+def _state_code(value) -> str | None:
+    text_value = str(value or "").strip().upper()
+    return text_value if len(text_value) == 2 and text_value.isalpha() else None
 
 
 def _order_line_items(row: dict) -> list | None:
@@ -282,7 +292,9 @@ async def _backfill_missing_order_details() -> int:
         if not ids:
             break
         try:
-            rows = await _hydrate_order_details([{"id": mercos_id} for mercos_id in ids])
+            rows = await _hydrate_order_details(
+                [{"id": mercos_id} for mercos_id in ids]
+            )
         except OrderDetailBatchError as exc:
             log.warning("Backfill de itens Tray interrompido: %s", exc)
             break
@@ -302,11 +314,13 @@ def _upsert_rows(db, resource: str, rows: list):
     for row in rows:
         mid = str(row.get("id"))
         if resource == "customers":
-            obj = db.scalar(select(Customer).where(Customer.mercos_id == mid)) or Customer(mercos_id=mid)
+            obj = db.scalar(
+                select(Customer).where(Customer.mercos_id == mid)
+            ) or Customer(mercos_id=mid)
             obj.name = row.get("nome") or row.get("razao_social") or "Sem nome"
             obj.document = row.get("cnpj") or row.get("cpf")
             obj.city = row.get("cidade")
-            obj.state = row.get("estado")
+            obj.state = _state_code(row.get("estado"))
             emails = _customer_emails(row)
             phones = _customer_phones(row)
             obj.emails = emails
@@ -334,7 +348,9 @@ def _upsert_rows(db, resource: str, rows: list):
             db.add(obj)
             persisted += 1
         elif resource == "products":
-            obj = db.scalar(select(Product).where(Product.mercos_id == mid)) or Product(mercos_id=mid)
+            obj = db.scalar(select(Product).where(Product.mercos_id == mid)) or Product(
+                mercos_id=mid
+            )
             obj.code = str(row.get("codigo") or "")
             obj.name = row.get("nome") or "Sem nome"
             obj.category_id = str(row.get("categoria_id") or "") or None
@@ -353,23 +369,39 @@ def _upsert_rows(db, resource: str, rows: list):
             db.add(obj)
             persisted += 1
         elif resource == "users":
-            obj = db.scalar(select(Seller).where(Seller.mercos_id == mid)) or Seller(mercos_id=mid)
+            obj = db.scalar(select(Seller).where(Seller.mercos_id == mid)) or Seller(
+                mercos_id=mid
+            )
             obj.name = row.get("nome") or row.get("email") or "Sem nome"
             obj.active = bool(row.get("ativo", True))
             obj.raw = row
             db.add(obj)
             persisted += 1
-        elif resource == "orders":
+        elif resource in {"orders", ORDER_HISTORY_RESOURCE}:
             obj = db.scalar(select(Order).where(Order.mercos_id == mid)) or Order(
                 mercos_id=mid, number=mid, status="unknown"
             )
             obj.number = str(row.get("numero") or mid)
             obj.customer_mercos_id = str(row.get("cliente_id") or "") or None
             obj.seller_mercos_id = (
-                str(row.get("criador_id") or row.get("usuario_id") or row.get("vendedor_id") or "") or None
+                str(
+                    row.get("criador_id")
+                    or row.get("usuario_id")
+                    or row.get("vendedor_id")
+                    or ""
+                )
+                or None
             )
-            obj.status = str(row.get("status") if row.get("status") is not None else row.get("situacao") or "unknown")
-            obj.issued_at = dt(row.get("data_emissao") or row.get("data_criacao") or row.get("ultima_alteracao"))
+            obj.status = str(
+                row.get("status")
+                if row.get("status") is not None
+                else row.get("situacao") or "unknown"
+            )
+            obj.issued_at = dt(
+                row.get("data_emissao")
+                or row.get("data_criacao")
+                or row.get("ultima_alteracao")
+            )
             obj.total = f(row.get("total"))
             obj.discount = f(row.get("desconto"))
             source_items = row.get("itens") or row.get("items") or []
@@ -396,9 +428,7 @@ def _upsert_rows(db, resource: str, rows: list):
                     Decimal("0"),
                 )
             if "tipo_pedido_id" in row:
-                obj.order_type_mercos_id = (
-                    str(row.get("tipo_pedido_id") or "") or None
-                )
+                obj.order_type_mercos_id = str(row.get("tipo_pedido_id") or "") or None
             if "condicao_pagamento_id" in row:
                 obj.payment_condition_mercos_id = (
                     str(row.get("condicao_pagamento_id") or "") or None
@@ -408,15 +438,15 @@ def _upsert_rows(db, resource: str, rows: list):
                     str(row.get("tabela_preco_id") or "") or None
                 )
             if "transportadora_id" in row:
-                obj.carrier_mercos_id = (
-                    str(row.get("transportadora_id") or "") or None
-                )
+                obj.carrier_mercos_id = str(row.get("transportadora_id") or "") or None
             if "politica_comercial_id" in row:
                 obj.commercial_policy_mercos_id = (
                     str(row.get("politica_comercial_id") or "") or None
                 )
             explicit_gross = optional_decimal(row, "total_bruto", "valor_bruto")
-            obj.net_total = optional_decimal(row, "total_liquido", "valor_liquido", "total")
+            obj.net_total = optional_decimal(
+                row, "total_liquido", "valor_liquido", "total"
+            )
             explicit_discount = optional_decimal(
                 row,
                 "valor_desconto",
@@ -425,7 +455,9 @@ def _upsert_rows(db, resource: str, rows: list):
             obj.discount_value = (
                 explicit_discount
                 if explicit_discount is not None
-                else derived_discount if complete_item_prices else None
+                else derived_discount
+                if complete_item_prices
+                else None
             )
             obj.gross_total = (
                 explicit_gross
@@ -456,22 +488,12 @@ def _upsert_rows(db, resource: str, rows: list):
                     if item.get("produto_id") is not None
                 }
             )
-            obj.shipping_method_id = (
-                str(row.get("metodo_envio_id") or "") or None
-            )
-            obj.shipping_method = (
-                str(row.get("metodo_envio") or "").strip() or None
-            )
+            obj.shipping_method_id = str(row.get("metodo_envio_id") or "") or None
+            obj.shipping_method = str(row.get("metodo_envio") or "").strip() or None
             obj.shipping_cost = optional_decimal(row, "valor_frete")
-            obj.shipment_status = (
-                str(row.get("status_envio") or "").strip() or None
-            )
-            obj.tracking_code = (
-                str(row.get("codigo_rastreio") or "").strip() or None
-            )
-            obj.tracking_url = (
-                str(row.get("url_rastreio") or "").strip() or None
-            )
+            obj.shipment_status = str(row.get("status_envio") or "").strip() or None
+            obj.tracking_code = str(row.get("codigo_rastreio") or "").strip() or None
+            obj.tracking_url = str(row.get("url_rastreio") or "").strip() or None
             obj.shipped_at = dt(row.get("data_envio"))
             obj.delivered_at = dt(row.get("data_entrega"))
             obj.estimated_delivery = (
@@ -483,9 +505,7 @@ def _upsert_rows(db, resource: str, rows: list):
             obj.distribution_center_id = (
                 str(row.get("centro_distribuicao_id") or "") or None
             )
-            obj.shipping_city = (
-                str(row.get("cidade_entrega") or "").strip() or None
-            )
+            obj.shipping_city = str(row.get("cidade_entrega") or "").strip() or None
             obj.shipping_state = (
                 str(row.get("estado_entrega") or "").strip().upper() or None
             )
@@ -521,16 +541,22 @@ def _upsert_rows(db, resource: str, rows: list):
                             or None
                         ),
                         product_mercos_id=str(item.get("produto_id") or "") or None,
-                        code=str(item.get("produto_codigo") or item.get("codigo") or ""),
-                        name=item.get("produto_nome") or item.get("nome") or item.get("descricao") or "Produto",
+                        code=str(
+                            item.get("produto_codigo") or item.get("codigo") or ""
+                        ),
+                        name=item.get("produto_nome")
+                        or item.get("nome")
+                        or item.get("descricao")
+                        or "Produto",
                         quantity=q,
                         list_unit_price=list_unit,
                         unit_price=unit,
-                        discount=f(item.get("desconto") or item.get("desconto_de_cupom")),
+                        discount=f(
+                            item.get("desconto") or item.get("desconto_de_cupom")
+                        ),
                         total=total,
                         excluded=(
-                            str(item.get("excluido", False)).lower()
-                            in {"true", "1"}
+                            str(item.get("excluido", False)).lower() in {"true", "1"}
                         ),
                         raw=item,
                     )
@@ -548,12 +574,7 @@ def _upsert_rows(db, resource: str, rows: list):
             obj.source_updated_at = dt(row.get("ultima_alteracao"))
             if resource == "categories":
                 obj.parent_mercos_id = (
-                    str(
-                        row.get("categoria_pai_id")
-                        or row.get("pai_id")
-                        or ""
-                    )
-                    or None
+                    str(row.get("categoria_pai_id") or row.get("pai_id") or "") or None
                 )
             obj.raw = row
             db.add(obj)
@@ -562,9 +583,7 @@ def _upsert_rows(db, resource: str, rows: list):
             product_id = str(row.get("produto_id") or "")
             price_table_id = str(row.get("tabela_preco_id") or "")
             if not product_id or not price_table_id:
-                raise ValueError(
-                    "Preço de produto sem produto_id ou tabela_preco_id"
-                )
+                raise ValueError("Preço de produto sem produto_id ou tabela_preco_id")
             obj = db.scalar(
                 select(ProductPrice).where(
                     ProductPrice.product_mercos_id == product_id,
@@ -588,9 +607,7 @@ def _upsert_rows(db, resource: str, rows: list):
             ) or TrayEntity(resource=resource, source_id=mid)
             obj.payload = row
             obj.source_updated_at = dt(
-                row.get("modified")
-                or row.get("updated")
-                or row.get("updated_at")
+                row.get("modified") or row.get("updated") or row.get("updated_at")
             )
             obj.synced_at = datetime.now(timezone.utc)
             db.add(obj)
@@ -602,7 +619,9 @@ def _upsert_rows(db, resource: str, rows: list):
                     else None
                 )
                 if customer is not None:
-                    customer.addresses = _merge_customer_address(customer.addresses, row)
+                    customer.addresses = _merge_customer_address(
+                        customer.addresses, row
+                    )
                     customer.city = customer.city or row.get("city")
                     customer.state = customer.state or row.get("state")
                     raw = dict(customer.raw or {})
@@ -745,9 +764,7 @@ def _claim_sync(resource: str, full: bool, started_at: datetime):
             if _lease_is_active(other, now):
                 return None
         state = db.scalar(
-            select(SyncState)
-            .where(SyncState.resource == resource)
-            .with_for_update()
+            select(SyncState).where(SyncState.resource == resource).with_for_update()
         )
         if state is None:
             state = SyncState(resource=resource)
@@ -845,9 +862,7 @@ def _persist_sync_page(
     with SessionLocal() as db:
         _acquire_sync_coordination_lock(db)
         state = db.scalar(
-            select(SyncState)
-            .where(SyncState.resource == resource)
-            .with_for_update()
+            select(SyncState).where(SyncState.resource == resource).with_for_update()
         )
         if state is None or state.lease_token != lease_token:
             raise RuntimeError(f"Lease de sincronização perdida para {resource}")
@@ -942,7 +957,9 @@ async def sync_resource(resource: str, full=False, *, raise_http=True):
     # every execution must resume from the committed checkpoint. Old clients may
     # still send full=true, so enforce incremental mode at this lowest layer.
     if full:
-        log.info("Ignoring full sync request for %s; incremental mode is mandatory", resource)
+        log.info(
+            "Ignoring full sync request for %s; incremental mode is mandatory", resource
+        )
     full = False
     started_at = datetime.now(timezone.utc)
     claim = await asyncio.to_thread(_claim_sync, resource, full, started_at)
@@ -954,9 +971,7 @@ async def sync_resource(resource: str, full=False, *, raise_http=True):
         }
     run_id, lease_token, cursor_before = claim
     cursor = None if full else cursor_before
-    heartbeat_task = asyncio.create_task(
-        _keep_sync_lease_alive(resource, lease_token)
-    )
+    heartbeat_task = asyncio.create_task(_keep_sync_lease_alive(resource, lease_token))
 
     pages = 0
     received = 0
@@ -972,8 +987,10 @@ async def sync_resource(resource: str, full=False, *, raise_http=True):
             if not rows:
                 break
             received += len(rows)
-            if resource == "orders":
-                details_needed = sum(1 for row in rows if _order_line_items(row) is None)
+            if resource in {"orders", ORDER_HISTORY_RESOURCE}:
+                details_needed = sum(
+                    1 for row in rows if _order_line_items(row) is None
+                )
                 try:
                     rows = await _hydrate_order_details(rows)
                     details_consulted += details_needed
@@ -1018,7 +1035,9 @@ async def sync_resource(resource: str, full=False, *, raise_http=True):
                 break
             cursor = next_cursor
         else:
-            error = f"Limite de {MAX_PAGES} páginas; rode sync incremental para continuar"
+            error = (
+                f"Limite de {MAX_PAGES} páginas; rode sync incremental para continuar"
+            )
             snapshot = await asyncio.to_thread(
                 _finish_sync_run,
                 run_id,
@@ -1035,10 +1054,15 @@ async def sync_resource(resource: str, full=False, *, raise_http=True):
                 started_at=started_at,
                 error=error,
             )
-            log.warning("Sync %s partial after %s pages (%s records)", resource, MAX_PAGES, persisted)
+            log.warning(
+                "Sync %s partial after %s pages (%s records)",
+                resource,
+                MAX_PAGES,
+                persisted,
+            )
             return {**snapshot, "records": persisted, "status": "partial"}
 
-        if resource == "orders":
+        if resource in {"orders", ORDER_HISTORY_RESOURCE}:
             details_consulted += await _backfill_missing_order_details()
 
         snapshot = await asyncio.to_thread(
@@ -1203,3 +1227,34 @@ async def sync_orders_job():
 
 async def sync_catalog_job():
     await _run_resource_sequence(CATALOG_RESOURCES, False)
+
+
+def prepare_order_history_sync(
+    start_date: str,
+    end_date: str,
+    *,
+    reset: bool = False,
+) -> dict:
+    """Create or resume a date-bounded historical order checkpoint."""
+    initial_cursor = order_history_cursor(start_date, end_date)
+    range_marker = f":{start_date}|{end_date}|"
+    with SessionLocal() as db:
+        _acquire_sync_coordination_lock(db)
+        state = db.get(SyncState, ORDER_HISTORY_RESOURCE)
+        if state is None:
+            state = SyncState(resource=ORDER_HISTORY_RESOURCE)
+            db.add(state)
+            db.flush()
+        if _lease_is_active(state, datetime.now(timezone.utc)):
+            return {"status": "running", "cursor": state.cursor}
+        same_range = bool(state.cursor and range_marker in state.cursor)
+        if reset or not same_range or state.status == "success":
+            state.cursor = initial_cursor
+            state.records = 0
+        state.status = "interrupted" if same_range and not reset else "never"
+        state.error = None
+        state.lease_token = None
+        state.heartbeat_at = None
+        db.add(state)
+        db.commit()
+        return {"status": state.status, "cursor": state.cursor}

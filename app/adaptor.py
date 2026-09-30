@@ -38,6 +38,7 @@ PAGE_SIZE = 50
 ORDER_PAGE_SIZE = 10
 ORDER_CURSOR_PREFIX = "tray-order-desc-page:"
 CUSTOMER_CURSOR_PREFIX = "tray-customer-desc-page:"
+ORDER_HISTORY_CURSOR_PREFIX = "tray-order-history-page:"
 
 _request_lock = asyncio.Lock()
 _not_before = 0.0
@@ -115,9 +116,7 @@ def _bool(value: object, default: bool = True) -> bool:
         return value
     if value in (None, ""):
         return default
-    return str(value).strip().lower() in {
-        "1", "true", "yes", "sim", "active", "ativo"
-    }
+    return str(value).strip().lower() in {"1", "true", "yes", "sim", "active", "ativo"}
 
 
 def _watermark(rows: list[dict], previous: str | None) -> str | None:
@@ -134,7 +133,7 @@ def _decode_cursor(cursor: str | None) -> tuple[int, str | None, str | None]:
     prefixes = ("tray-page:", ORDER_CURSOR_PREFIX, CUSTOMER_CURSOR_PREFIX)
     if cursor and cursor.startswith(prefixes):
         prefix = next(value for value in prefixes if cursor.startswith(value))
-        page, state = cursor[len(prefix):].split(":", 1)
+        page, state = cursor[len(prefix) :].split(":", 1)
         base_since, _, watermark = state.partition("|")
         return max(int(page), 1), base_since or None, watermark or None
     return 1, cursor or None, cursor or None
@@ -148,6 +147,21 @@ def _encode_cursor(
     prefix: str = "tray-page:",
 ) -> str:
     return f"{prefix}{page}:{base_since or ''}|{watermark or ''}"
+
+
+def _decode_order_history_cursor(cursor: str) -> tuple[int, str, str, str | None]:
+    if not cursor.startswith(ORDER_HISTORY_CURSOR_PREFIX):
+        raise ValueError("Cursor de histórico de pedidos inválido")
+    page_text, state = cursor[len(ORDER_HISTORY_CURSOR_PREFIX) :].split(":", 1)
+    start_date, separator, remainder = state.partition("|")
+    end_date, _, watermark = remainder.partition("|")
+    if not separator or not start_date or not end_date:
+        raise ValueError("Cursor de histórico de pedidos incompleto")
+    return max(int(page_text), 1), start_date, end_date, watermark or None
+
+
+def order_history_cursor(start_date: str, end_date: str, page: int = 1) -> str:
+    return f"{ORDER_HISTORY_CURSOR_PREFIX}{max(page, 1)}:{start_date}|{end_date}|"
 
 
 def _sale_status(order: dict) -> str:
@@ -171,30 +185,38 @@ def _first(mapping: dict, *keys: str):
 
 
 def _shipment_status(order: dict) -> str:
-    raw = str(
-        _first(
-            order,
-            "shipment_status",
-            "shipping_status",
-            "status_frete_ml",
-            "status_group",
-            "status",
+    raw = (
+        str(
+            _first(
+                order,
+                "shipment_status",
+                "shipping_status",
+                "status_frete_ml",
+                "status_group",
+                "status",
+            )
+            or ""
         )
-        or ""
-    ).strip().lower()
+        .strip()
+        .lower()
+    )
     delivered = _first(order, "delivery_date", "date_delivered", "delivered_at")
     delivered_flag = str(order.get("delivered") or "").strip().lower()
-    if delivered or delivered_flag in {"1", "true", "yes", "sim"} or raw in {
-        "completed",
-        "delivered",
-        "entregue",
-        "finalizado",
-    }:
-        return "delivered"
     if (
-        _first(order, "shipment_date", "sending_date", "shipped_at", "sending_code")
-        or raw in {"shipped", "sent", "enviado"}
+        delivered
+        or delivered_flag in {"1", "true", "yes", "sim"}
+        or raw
+        in {
+            "completed",
+            "delivered",
+            "entregue",
+            "finalizado",
+        }
     ):
+        return "delivered"
+    if _first(
+        order, "shipment_date", "sending_date", "shipped_at", "sending_code"
+    ) or raw in {"shipped", "sent", "enviado"}:
         return "shipped"
     if _first(order, "shipment", "shipping_method", "shipping_id") or raw in {
         "awaiting_shipment",
@@ -273,7 +295,10 @@ def _product(row: dict) -> dict:
 def _user(row: dict) -> dict:
     return {
         "id": row.get("id"),
-        "nome": row.get("full_name") or row.get("name") or row.get("email") or "Sem nome",
+        "nome": row.get("full_name")
+        or row.get("name")
+        or row.get("email")
+        or "Sem nome",
         "email": row.get("email"),
         "ativo": _bool(row.get("active"), True),
         "tray": row,
@@ -308,7 +333,9 @@ def _order_header(row: dict) -> dict:
         "status": _sale_status(row),
         "status_tray": row.get("status"),
         "status_group": row.get("status_group"),
-        "data_emissao": row.get("payment_date") or row.get("date") or row.get("created"),
+        "data_emissao": row.get("payment_date")
+        or row.get("date")
+        or row.get("created"),
         "data_criacao": row.get("created") or row.get("date"),
         "ultima_alteracao": row.get("modified") or row.get("date"),
         "total": row.get("total") or 0,
@@ -340,11 +367,18 @@ def _order_header(row: dict) -> dict:
 
 def _order_detail(payload: dict, order_id: str) -> dict:
     order = payload.get("order") if isinstance(payload.get("order"), dict) else {}
-    shipping = payload.get("shipping") if isinstance(payload.get("shipping"), dict) else {}
+    shipping = (
+        payload.get("shipping") if isinstance(payload.get("shipping"), dict) else {}
+    )
     address = next(
         (
             payload.get(key)
-            for key in ("customer_address", "customerAddress", "CustomerAddress", "address")
+            for key in (
+                "customer_address",
+                "customerAddress",
+                "CustomerAddress",
+                "address",
+            )
             if isinstance(payload.get(key), (dict, list))
         ),
         order.get("customer_address") or order.get("CustomerAddress"),
@@ -352,7 +386,9 @@ def _order_detail(payload: dict, order_id: str) -> dict:
     combined_order = {**order, **shipping}
     if address:
         combined_order["customer_address"] = address
-    products = payload.get("products") if isinstance(payload.get("products"), list) else []
+    products = (
+        payload.get("products") if isinstance(payload.get("products"), list) else []
+    )
     header = {
         key: value
         for key, value in _order_header({"id": order_id, **combined_order}).items()
@@ -371,7 +407,8 @@ def _order_detail(payload: dict, order_id: str) -> dict:
                     f"{product.get('variant_id') or 0}:{position}"
                 ),
                 "produto_id": product.get("product_id"),
-                "produto_codigo": product.get("variant_id") or product.get("product_id"),
+                "produto_codigo": product.get("variant_id")
+                or product.get("product_id"),
                 "produto_nome": product.get("name") or "Produto",
                 "quantidade": str(quantity),
                 "preco_tabela": str(original),
@@ -391,6 +428,7 @@ RESOURCE_MAP = {
     "users": ("/internal/users", "users", _user),
     "categories": ("/internal/categories", "categories", _category),
     "orders": ("/internal/orders", "orders", _order_header),
+    "orders-history": ("/internal/orders", "orders", _order_header),
     "product-properties": ("/internal/products/properties", "properties", _raw_entity),
     "variants": ("/internal/products/variants", "variants", _raw_entity),
     "brands": ("/internal/brands", "brands", _raw_entity),
@@ -501,16 +539,30 @@ class Adaptor:
         if resource not in RESOURCE_MAP:
             raise HTTPException(404, f"Recurso Tray não suportado: {resource}")
         path, key, normalizer = RESOURCE_MAP[resource]
-        page, base_since, accumulated_watermark = _decode_cursor(cursor)
-        page_size = ORDER_PAGE_SIZE if resource == "orders" else PAGE_SIZE
+        history_range: tuple[str, str] | None = None
+        if resource == "orders-history":
+            if not cursor:
+                raise ValueError("Cursor obrigatório para carga histórica")
+            page, start_date, end_date, accumulated_watermark = (
+                _decode_order_history_cursor(cursor)
+            )
+            base_since = None
+            history_range = (start_date, end_date)
+        else:
+            page, base_since, accumulated_watermark = _decode_cursor(cursor)
+        page_size = (
+            ORDER_PAGE_SIZE if resource in {"orders", "orders-history"} else PAGE_SIZE
+        )
         params: dict[str, object] = {"page": page, "limit": page_size}
         cursor_prefix = "tray-page:"
-        if resource in {"orders", "customers"}:
+        if resource == "orders-history":
+            params["sort"] = "id_asc"
+            params["date"] = f"{history_range[0]},{history_range[1]}"
+            cursor_prefix = ORDER_HISTORY_CURSOR_PREFIX
+        elif resource in {"orders", "customers"}:
             params["sort"] = "id_desc"
             cursor_prefix = (
-                ORDER_CURSOR_PREFIX
-                if resource == "orders"
-                else CUSTOMER_CURSOR_PREFIX
+                ORDER_CURSOR_PREFIX if resource == "orders" else CUSTOMER_CURSOR_PREFIX
             )
             # One-time migration from the former ascending pagination. Starting
             # the descending stream at its old page would skip the newest data.
@@ -522,7 +574,11 @@ class Adaptor:
         payload = await self._get(path, params=params, retries=retries)
         keys = (key,) if isinstance(key, str) else key
         source_rows = next(
-            (payload.get(candidate) for candidate in keys if isinstance(payload.get(candidate), list)),
+            (
+                payload.get(candidate)
+                for candidate in keys
+                if isinstance(payload.get(candidate), list)
+            ),
             [],
         )
         rows = [
@@ -530,15 +586,29 @@ class Adaptor:
             for row in source_rows
             if isinstance(row, dict) and row.get("id") is not None
         ]
-        paging = payload.get("paging") if isinstance(payload.get("paging"), dict) else {}
+        paging = (
+            payload.get("paging") if isinstance(payload.get("paging"), dict) else {}
+        )
         total = int(paging.get("total") or len(rows))
         limit = int(paging.get("limit") or page_size)
         current_page = int(paging.get("page") or page)
         current_watermark = _watermark(source_rows, accumulated_watermark)
         has_next = current_page * limit < total and bool(rows)
-        return {
-            "data": rows,
-            "nextCursor": (
+        if resource == "orders-history":
+            start_date, end_date = history_range
+            next_cursor = (
+                f"{ORDER_HISTORY_CURSOR_PREFIX}{current_page + 1}:"
+                f"{start_date}|{end_date}|{current_watermark or ''}"
+                if has_next
+                else None
+            )
+            checkpoint_cursor = (
+                next_cursor
+                or f"{ORDER_HISTORY_CURSOR_PREFIX}{current_page}:"
+                f"{start_date}|{end_date}|{current_watermark or ''}"
+            )
+        else:
+            next_cursor = (
                 _encode_cursor(
                     current_page + 1,
                     base_since,
@@ -547,16 +617,21 @@ class Adaptor:
                 )
                 if has_next
                 else None
-            ),
-            # Durable resume point even on the final page. Catalog resources do
-            # not expose a universal changed-since filter in Tray, so their
-            # incremental checkpoint is the next source page.
-            "checkpointCursor": _encode_cursor(
+            )
+            checkpoint_cursor = _encode_cursor(
                 current_page + 1,
                 base_since,
                 current_watermark,
                 prefix=cursor_prefix,
-            ),
+            )
+
+        return {
+            "data": rows,
+            "nextCursor": next_cursor,
+            # Durable resume point even on the final page. Catalog resources do
+            # not expose a universal changed-since filter in Tray, so their
+            # incremental checkpoint is the next source page.
+            "checkpointCursor": checkpoint_cursor,
             "pageCursor": current_watermark,
         }
 
@@ -578,9 +653,7 @@ class Adaptor:
     async def health(self):
         cfg = settings()
         async with httpx.AsyncClient(timeout=20) as client:
-            response = await client.get(
-                f"{cfg.tray_adaptor_url.rstrip('/')}/health"
-            )
+            response = await client.get(f"{cfg.tray_adaptor_url.rstrip('/')}/health")
             response.raise_for_status()
             return response.json()
 

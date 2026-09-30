@@ -91,6 +91,34 @@ async def test_orders_migrate_ascending_cursor_to_newest_first(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_order_history_uses_explicit_date_range_and_resumable_page(monkeypatch):
+    async def fake_get(self, path, *, params=None, retries=8):
+        assert path == "/internal/orders"
+        assert params == {
+            "page": 3,
+            "limit": 10,
+            "sort": "id_asc",
+            "date": "2025-01-01,2026-09-30",
+        }
+        return {
+            "paging": {"total": 40, "page": 3, "limit": 10},
+            "orders": [{"id": 30, "date": "2025-03-01"}],
+        }
+
+    monkeypatch.setattr(Adaptor, "_get", fake_get)
+
+    result = await Adaptor().list(
+        "orders-history",
+        "tray-order-history-page:3:2025-01-01|2026-09-30|2025-02-28",
+    )
+
+    assert result["data"][0]["id"] == 30
+    assert result["nextCursor"].startswith(
+        "tray-order-history-page:4:2025-01-01|2026-09-30|"
+    )
+
+
+@pytest.mark.asyncio
 async def test_customer_preserves_complete_registration(monkeypatch):
     async def fake_get(self, path, *, params=None, retries=8):
         assert path == "/internal/customers"
