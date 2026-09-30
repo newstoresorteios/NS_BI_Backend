@@ -391,16 +391,16 @@ def _order_detail(payload: dict, order_id: str) -> dict:
     combined_order = {**order, **shipping}
     if address:
         combined_order["customer_address"] = address
-    products = (
-        payload.get("products") if isinstance(payload.get("products"), list) else []
-    )
+    products_present = isinstance(payload.get("products"), list)
+    products = payload.get("products") if products_present else []
     header = {
         key: value
         for key, value in _order_header({"id": order_id, **combined_order}).items()
         if value is not None
     }
     header["tray"] = payload
-    header["itens"] = []
+    if products_present:
+        header["itens"] = []
     for position, product in enumerate(products):
         quantity = _decimal(product.get("quantity") or 0)
         unit = _decimal(product.get("price") or 0)

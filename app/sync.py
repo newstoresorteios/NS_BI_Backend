@@ -387,30 +387,47 @@ def _upsert_rows(db, resource: str, rows: list):
             obj = db.scalar(select(Order).where(Order.mercos_id == mid)) or Order(
                 mercos_id=mid, number=mid, status="unknown"
             )
-            obj.number = str(row.get("numero") or mid)
-            obj.customer_mercos_id = str(row.get("cliente_id") or "") or None
-            obj.seller_mercos_id = (
-                str(
-                    row.get("criador_id")
-                    or row.get("usuario_id")
-                    or row.get("vendedor_id")
-                    or ""
+            if "numero" in row:
+                obj.number = str(row.get("numero") or mid)
+            if "cliente_id" in row:
+                obj.customer_mercos_id = str(row.get("cliente_id") or "") or None
+            if any(key in row for key in ("criador_id", "usuario_id", "vendedor_id")):
+                obj.seller_mercos_id = (
+                    str(
+                        row.get("criador_id")
+                        or row.get("usuario_id")
+                        or row.get("vendedor_id")
+                        or ""
+                    )
+                    or None
                 )
-                or None
+            if "status" in row or "situacao" in row:
+                obj.status = str(
+                    row.get("status")
+                    if row.get("status") is not None
+                    else row.get("situacao") or "unknown"
+                )
+            if any(
+                key in row
+                for key in ("data_emissao", "data_criacao", "ultima_alteracao")
+            ):
+                issued_at = dt(
+                    row.get("data_emissao")
+                    or row.get("data_criacao")
+                    or row.get("ultima_alteracao")
+                )
+                if issued_at is not None:
+                    obj.issued_at = issued_at
+            if "total" in row:
+                obj.total = f(row.get("total"))
+            if "desconto" in row:
+                obj.discount = f(row.get("desconto"))
+            items_present = "itens" in row or "items" in row
+            source_items = (
+                row.get("itens") or row.get("items") or []
+                if items_present
+                else []
             )
-            obj.status = str(
-                row.get("status")
-                if row.get("status") is not None
-                else row.get("situacao") or "unknown"
-            )
-            obj.issued_at = dt(
-                row.get("data_emissao")
-                or row.get("data_criacao")
-                or row.get("ultima_alteracao")
-            )
-            obj.total = f(row.get("total"))
-            obj.discount = f(row.get("desconto"))
-            source_items = row.get("itens") or row.get("items") or []
             items = [
                 item
                 for item in source_items
@@ -450,79 +467,99 @@ def _upsert_rows(db, resource: str, rows: list):
                     str(row.get("politica_comercial_id") or "") or None
                 )
             explicit_gross = optional_decimal(row, "total_bruto", "valor_bruto")
-            obj.net_total = optional_decimal(
-                row, "total_liquido", "valor_liquido", "total"
+            financial_present = any(
+                key in row
+                for key in (
+                    "total_bruto",
+                    "valor_bruto",
+                    "total_liquido",
+                    "valor_liquido",
+                    "total",
+                    "valor_desconto",
+                    "desconto_valor",
+                    "desconto_percentual",
+                    "percentual_desconto",
+                )
             )
+            if financial_present:
+                obj.net_total = optional_decimal(
+                    row, "total_liquido", "valor_liquido", "total"
+                )
             explicit_discount = optional_decimal(
                 row,
                 "valor_desconto",
                 "desconto_valor",
             )
-            obj.discount_value = (
-                explicit_discount
-                if explicit_discount is not None
-                else derived_discount
-                if complete_item_prices
-                else None
-            )
-            obj.gross_total = (
-                explicit_gross
-                if explicit_gross is not None
-                else (
-                    obj.net_total + derived_discount
-                    if complete_item_prices and obj.net_total is not None
+            if financial_present or items_present:
+                obj.discount_value = (
+                    explicit_discount
+                    if explicit_discount is not None
+                    else derived_discount
+                    if complete_item_prices
                     else None
                 )
-            )
+                obj.gross_total = (
+                    explicit_gross
+                    if explicit_gross is not None
+                    else (
+                        obj.net_total + derived_discount
+                        if complete_item_prices and obj.net_total is not None
+                        else obj.gross_total
+                    )
+                )
             explicit_discount_percent = optional_decimal(
                 row,
                 "desconto_percentual",
                 "percentual_desconto",
             )
-            obj.discount_percent = explicit_discount_percent
-            if (
-                explicit_discount_percent is None
-                and obj.gross_total
-                and obj.discount_value is not None
-            ):
-                obj.discount_percent = obj.discount_value / obj.gross_total * 100
-            obj.item_count = len(items)
-            obj.sku_count = len(
-                {
-                    str(item.get("produto_id"))
-                    for item in items
-                    if item.get("produto_id") is not None
-                }
-            )
-            obj.shipping_method_id = str(row.get("metodo_envio_id") or "") or None
-            obj.shipping_method = str(row.get("metodo_envio") or "").strip() or None
-            obj.shipping_cost = optional_decimal(row, "valor_frete")
-            obj.shipment_status = str(row.get("status_envio") or "").strip() or None
-            obj.tracking_code = str(row.get("codigo_rastreio") or "").strip() or None
-            obj.tracking_url = str(row.get("url_rastreio") or "").strip() or None
-            obj.shipped_at = dt(row.get("data_envio"))
-            obj.delivered_at = dt(row.get("data_entrega"))
-            obj.estimated_delivery = (
-                str(row.get("previsao_entrega") or "").strip() or None
-            )
-            obj.shipment_integrator = (
-                str(row.get("integrador_envio") or "").strip() or None
-            )
-            obj.distribution_center_id = (
-                str(row.get("centro_distribuicao_id") or "") or None
-            )
-            obj.shipping_city = str(row.get("cidade_entrega") or "").strip() or None
-            obj.shipping_state = (
-                str(row.get("estado_entrega") or "").strip().upper() or None
-            )
+            if financial_present or items_present:
+                obj.discount_percent = explicit_discount_percent
+                if (
+                    explicit_discount_percent is None
+                    and obj.gross_total
+                    and obj.discount_value is not None
+                ):
+                    obj.discount_percent = (
+                        obj.discount_value / obj.gross_total * 100
+                    )
+            if items_present:
+                obj.item_count = len(items)
+                obj.sku_count = len(
+                    {
+                        str(item.get("produto_id"))
+                        for item in items
+                        if item.get("produto_id") is not None
+                    }
+                )
+            logistics_fields = {
+                "metodo_envio_id": ("shipping_method_id", lambda value: str(value or "") or None),
+                "metodo_envio": ("shipping_method", lambda value: str(value or "").strip() or None),
+                "valor_frete": ("shipping_cost", lambda _: optional_decimal(row, "valor_frete")),
+                "status_envio": ("shipment_status", lambda value: str(value or "").strip() or None),
+                "codigo_rastreio": ("tracking_code", lambda value: str(value or "").strip() or None),
+                "url_rastreio": ("tracking_url", lambda value: str(value or "").strip() or None),
+                "data_envio": ("shipped_at", dt),
+                "data_entrega": ("delivered_at", dt),
+                "previsao_entrega": ("estimated_delivery", lambda value: str(value or "").strip() or None),
+                "integrador_envio": ("shipment_integrator", lambda value: str(value or "").strip() or None),
+                "centro_distribuicao_id": ("distribution_center_id", lambda value: str(value or "") or None),
+                "cidade_entrega": ("shipping_city", lambda value: str(value or "").strip() or None),
+                "estado_entrega": ("shipping_state", lambda value: str(value or "").strip().upper() or None),
+            }
+            for source_key, (attribute, converter) in logistics_fields.items():
+                if source_key in row:
+                    setattr(obj, attribute, converter(row.get(source_key)))
             if "data_criacao" in row:
                 obj.source_created_at = dt(row.get("data_criacao"))
-            obj.source_updated_at = dt(row.get("ultima_alteracao"))
-            obj.raw = row
+            if "ultima_alteracao" in row:
+                obj.source_updated_at = dt(row.get("ultima_alteracao"))
+            previous_raw = obj.raw if isinstance(obj.raw, dict) else {}
+            obj.raw = {**previous_raw, **row}
             db.add(obj)
             db.flush()
-            db.execute(delete(OrderItem).where(OrderItem.order_mercos_id == mid))
-            for pos, item in enumerate(source_items):
+            if items_present:
+                db.execute(delete(OrderItem).where(OrderItem.order_mercos_id == mid))
+            for pos, item in enumerate(source_items if items_present else []):
                 q = f(item.get("quantidade"))
                 list_unit = optional_decimal(item, "preco_tabela")
                 unit = optional_decimal(
@@ -1264,3 +1301,22 @@ def prepare_order_history_sync(
         db.add(state)
         db.commit()
         return {"status": state.status, "cursor": state.cursor}
+
+
+def reset_sync_checkpoint(resource: str) -> None:
+    """Reset one idle resource so its next run starts at the first Tray page."""
+    with SessionLocal() as db:
+        _acquire_sync_coordination_lock(db)
+        state = db.get(SyncState, resource)
+        if state is None:
+            state = SyncState(resource=resource)
+        if _lease_is_active(state, datetime.now(timezone.utc)):
+            raise RuntimeError(f"Sincronização de {resource} está em andamento")
+        state.cursor = None
+        state.records = 0
+        state.status = "never"
+        state.error = None
+        state.lease_token = None
+        state.heartbeat_at = None
+        db.add(state)
+        db.commit()

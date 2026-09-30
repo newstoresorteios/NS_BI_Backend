@@ -38,6 +38,7 @@ from app.sync import (
     active_sync_resources,
     interrupt_running_syncs,
     prepare_order_history_sync,
+    reset_sync_checkpoint,
     sync_all,
     sync_catalog_job,
     sync_orders_job,
@@ -474,6 +475,8 @@ async def run_sync(
                     "resource": resource,
                 },
             )
+    elif resource == "orders" and reset:
+        await asyncio.to_thread(reset_sync_checkpoint, resource)
 
     _sync_busy = True
     clear_cancel()
@@ -484,7 +487,10 @@ async def run_sync(
             if resource == "all":
                 await sync_all(False, raise_http=False)
             elif resource == "orders":
-                await sync_orders_job()
+                if reset:
+                    await sync_resource("orders", False, raise_http=False)
+                else:
+                    await sync_orders_job()
             elif resource == ORDER_HISTORY_RESOURCE:
                 await sync_resource(resource, False, raise_http=False)
             else:
