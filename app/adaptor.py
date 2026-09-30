@@ -38,7 +38,7 @@ PAGE_SIZE = 50
 ORDER_PAGE_SIZE = 10
 ORDER_CURSOR_PREFIX = "tray-order-desc-page:"
 CUSTOMER_CURSOR_PREFIX = "tray-customer-desc-page:"
-ORDER_HISTORY_CURSOR_PREFIX = "tray-order-history-page:"
+ORDER_HISTORY_CURSOR_PREFIX = "tray-order-date-history-page:"
 
 _request_lock = asyncio.Lock()
 _not_before = 0.0
@@ -553,9 +553,6 @@ class Adaptor:
             )
             base_since = None
             history_range = (start_date, end_date)
-            path = "/internal/products-sold"
-            key = "sold_products"
-            normalizer = _sold_order_stub
         else:
             page, base_since, accumulated_watermark = _decode_cursor(cursor)
         page_size = ORDER_PAGE_SIZE if resource == "orders" else PAGE_SIZE
@@ -563,6 +560,7 @@ class Adaptor:
         cursor_prefix = "tray-page:"
         if resource == "orders-history":
             params["sort"] = "id_asc"
+            params["date"] = f"{start_date},{end_date} 23:59:59"
             cursor_prefix = ORDER_HISTORY_CURSOR_PREFIX
         elif resource in {"orders", "customers"}:
             params["sort"] = "id_desc"
@@ -592,15 +590,10 @@ class Adaptor:
             if isinstance(row, dict) and row.get("id") is not None
         ]
         if resource == "orders-history":
-            # Several products from one order can share a source page.  Hydrate
-            # each order only once while preserving its first-seen order.
-            rows = list(
-                {
-                    str(row["id"]): row
-                    for row in rows
-                    if row.get("id") is not None
-                }.values()
-            )
+            for row in source_rows:
+                source_date = str(row.get("date") or row.get("created") or "")[:10]
+                if not source_date or not start_date <= source_date <= end_date:
+                    raise ValueError("Tray retornou pedido fora do período histórico solicitado")
         paging = (
             payload.get("paging") if isinstance(payload.get("paging"), dict) else {}
         )
@@ -679,6 +672,8 @@ class Adaptor:
             if "itens" in detail:
                 basic["itens"] = detail["itens"]
             detail = {**detail, **basic, "id": str(source_id)}
+        if not detail.get("data_emissao"):
+            raise HTTPException(502, f"Pedido {source_id} sem data; gravação bloqueada")
         return detail
 
     async def health(self):

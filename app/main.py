@@ -482,8 +482,8 @@ async def run_sync(
             raise HTTPException(422, "Use start e end no formato YYYY-MM-DD") from exc
         if start_date > end_date:
             raise HTTPException(422, "start deve ser anterior ou igual a end")
-        if (end_date - start_date).days > 3660:
-            raise HTTPException(422, "Intervalo histórico máximo de 10 anos")
+        if start_date.year < 1900 or end_date > datetime.now(timezone.utc).date():
+            raise HTTPException(422, "Intervalo histórico fora dos limites válidos")
 
     running_resources = await asyncio.to_thread(active_sync_resources)
     running = bool(running_resources)
