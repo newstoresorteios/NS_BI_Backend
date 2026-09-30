@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi import HTTPException
@@ -86,3 +86,19 @@ async def test_daily_budget_and_operator_cancellation(db_factory, monkeypatch):
         state.error = "Interrompida pelo operador"
         db.commit()
     assert (await history.resume())["status"] == "idle"
+
+
+def test_stale_worker_can_resume_but_live_worker_cannot(db_factory):
+    history.prepare(1, 1)
+    with db_factory() as db:
+        state = db.get(SyncState, sync.ORDER_HISTORY_RESOURCE)
+        state.status = "running"
+        state.heartbeat_at = datetime.now(timezone.utc)
+        state.lease_token = "live"
+        db.commit()
+    assert not history.pending()
+    with db_factory() as db:
+        state = db.get(SyncState, sync.ORDER_HISTORY_RESOURCE)
+        state.heartbeat_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+        db.commit()
+    assert history.pending()

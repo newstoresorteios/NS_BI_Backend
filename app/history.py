@@ -50,10 +50,12 @@ def pending():
         state = db.get(SyncState, sync.ORDER_HISTORY_RESOURCE)
         if not state or not (state.cursor or "").startswith(PREFIX):
             return False
+        if state.status == "running":
+            return not sync._lease_is_active(state, datetime.now(timezone.utc))
         # Explicit operator cancellation is never auto-resumed.
         return state.status in {"partial", "never"} or (
             state.status == "interrupted"
-            and (state.error or "").startswith("Serviço reiniciou")
+            and (state.error or "").startswith(("Serviço reiniciou", "Lease de sincronização"))
         )
 
 
