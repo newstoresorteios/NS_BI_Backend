@@ -559,7 +559,7 @@ class Adaptor:
             params["sort"] = "id_asc"
             # Tray treats a date range as timestamps.  Make the upper bound
             # inclusive so orders created during the final day are not lost.
-            params["date"] = (
+            params["modified"] = (
                 f"{history_range[0]},{history_range[1]} 23:59:59"
             )
             cursor_prefix = ORDER_HISTORY_CURSOR_PREFIX
