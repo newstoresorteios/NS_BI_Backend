@@ -8,6 +8,7 @@ from app.main import app
 @pytest.mark.asyncio
 async def test_probe_is_bounded_and_redacts_customer_data(monkeypatch):
     async def fake_get(self, path, *, params=None, retries=8):
+        assert retries == 1
         assert path == "/internal/orders"
         assert params == {
             "page": 1, "limit": 10, "sort": "id_asc",

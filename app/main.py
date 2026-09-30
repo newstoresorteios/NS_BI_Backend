@@ -423,8 +423,8 @@ async def probe_orders(
             raise HTTPException(422, "Intervalo inválido")
         params["date"] = f"{first.isoformat()},{last.isoformat()} 23:59:59"
     if order_id:
-        basic = await adaptor._get(f"/internal/orders/{order_id}", retries=0)
-        complete = await adaptor._get(f"/internal/orders/{order_id}/complete", retries=0)
+        basic = await adaptor._get(f"/internal/orders/{order_id}", retries=1)
+        complete = await adaptor._get(f"/internal/orders/{order_id}/complete", retries=1)
         return {
             "basic": {key: basic.get("order", {}).get(key) for key in ("id", "date", "created", "modified")},
             "complete": {key: complete.get("order", {}).get(key) for key in ("id", "date", "created", "modified")},
@@ -432,7 +432,7 @@ async def probe_orders(
             "completeFields": sorted(complete.get("order", {})),
             "items": len(complete.get("products", [])),
         }
-    payload = await adaptor._get("/internal/orders", params=params, retries=0)
+    payload = await adaptor._get("/internal/orders", params=params, retries=1)
     return {
         "query": params,
         "paging": payload.get("paging", {}),
