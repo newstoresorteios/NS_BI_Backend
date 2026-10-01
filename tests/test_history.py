@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -100,5 +101,60 @@ def test_stale_worker_can_resume_but_live_worker_cannot(db_factory):
     with db_factory() as db:
         state = db.get(SyncState, sync.ORDER_HISTORY_RESOURCE)
         state.heartbeat_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+        db.commit()
+    assert history.pending()
+
+
+def test_schedule_starts_soon_after_boot():
+    class Scheduler:
+        def add_job(self, fn, trigger, **kwargs):
+            self.fn, self.trigger, self.options = fn, trigger, kwargs
+    scheduler = Scheduler()
+    before = datetime.now(timezone.utc)
+    history.schedule(scheduler)
+    assert scheduler.fn == history.resume
+    assert scheduler.trigger == "interval"
+    assert scheduler.options["seconds"] == 60
+    assert scheduler.options["max_instances"] == 1
+    assert before < scheduler.options["next_run_time"] < before + timedelta(seconds=10)
+
+
+@pytest.mark.asyncio
+async def test_shutdown_releases_lease_without_skipping_id(db_factory, monkeypatch):
+    async def fetch(self, path, *, retries):
+        raise asyncio.CancelledError
+    monkeypatch.setattr(type(history.adaptor), "_get", fetch)
+    initial = history.prepare(1, 2)
+    with pytest.raises(asyncio.CancelledError):
+        await history.resume()
+    with db_factory() as db:
+        state = db.get(SyncState, sync.ORDER_HISTORY_RESOURCE)
+        assert state.cursor == initial
+        assert state.status == "partial"
+        assert state.lease_token is None
+    assert history.pending()
+
+
+@pytest.mark.asyncio
+async def test_time_budget_yields_without_losing_checkpoint(db_factory, monkeypatch):
+    monkeypatch.setattr(history, "MAX_BATCH_SECONDS", 0)
+    initial = history.prepare(1, 2)
+    result = await history.resume()
+    assert result["status"] == "partial"
+    assert result["cursor"] == initial
+    assert history.pending()
+
+
+@pytest.mark.asyncio
+async def test_transient_error_obeys_persistent_cooldown(db_factory, monkeypatch):
+    async def fetch(self, path, *, retries):
+        raise HTTPException(429, "Quota")
+    monkeypatch.setattr(type(history.adaptor), "_get", fetch)
+    history.prepare(1, 2)
+    await history.resume()
+    assert not history.pending()
+    with db_factory() as db:
+        state = db.get(SyncState, sync.ORDER_HISTORY_RESOURCE)
+        state.heartbeat_at = datetime.now(timezone.utc) - timedelta(minutes=6)
         db.commit()
     assert history.pending()

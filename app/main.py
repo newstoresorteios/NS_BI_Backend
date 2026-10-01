@@ -57,8 +57,8 @@ async def lifespan(app):
     Base.metadata.create_all(engine)
     cfg = settings()
     log.info("CORS origins: %s", cfg.origins)
-    # Never auto-resume Tray sync on boot; it can starve dashboard reads on small instances.
-    # User clicks Sincronizar / Primeira carga when they want to sync.
+    # General catalog sync remains manual/on its normal schedule. Only an already
+    # requested historical recovery resumes automatically in short leased batches.
     with SessionLocal() as db:
         interrupted_at = datetime.now(timezone.utc)
         stale_before = interrupted_at - SYNC_LEASE_TTL
@@ -99,7 +99,7 @@ async def lifespan(app):
         if stuck or stuck_runs:
             db.commit()
             log.warning(
-                "Marked %s sync state(s) and %s run(s) interrupted (no auto-resume)",
+                "Marked %s stale sync state(s) and %s run(s) interrupted",
                 len(stuck),
                 len(stuck_runs),
             )
@@ -131,12 +131,8 @@ async def lifespan(app):
             max_instances=1,
             coalesce=True,
         )
+        history.schedule(scheduler)
         scheduler.start()
-        scheduler.add_job(
-            history.resume, "interval", minutes=60,
-            id="recover_order_history", replace_existing=True,
-            max_instances=1, coalesce=True,
-        )
         log.info(
             "Scheduler started (orders every %sm, catalog every %sh, adaptor ping every 8m)",
             cfg.sync_orders_minutes,
@@ -476,7 +472,7 @@ async def recover_order_history(
     return {"status": "started", "resource": ORDER_HISTORY_RESOURCE,
             "cursor": cursor, "batchAttempts": history.BATCH_ATTEMPTS,
             "dailyAttemptLimit": history.DAILY_ATTEMPTS,
-            "resumeEveryMinutes": 60}
+            "resumeEveryMinutes": 1, "batchTimeLimitSeconds": history.MAX_BATCH_SECONDS}
 
 
 @app.post("/api/v1/sync/cancel")
