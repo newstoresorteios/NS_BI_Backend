@@ -118,12 +118,14 @@ async def resume():
         while current >= first and attempts < allowance and time.monotonic() < deadline:
             bottom = max(first, current - 9)
             known = await asyncio.to_thread(existing, bottom, current)
+            rows = []
+            inspected = 0
             for source_id in range(current, bottom - 1, -1):
                 if attempts >= allowance or time.monotonic() >= deadline:
                     break
-                rows = []
                 if str(source_id) not in known:
                     attempts += 1
+                    request_started = time.monotonic()
                     try:
                         payload = await adaptor._get(f"/internal/orders/{source_id}/complete", retries=1)
                     except HTTPException as exc:
@@ -133,20 +135,23 @@ async def resume():
                         source = payload.get("order", {})
                         if str(source.get("id")) != str(source_id) or not source.get("date") or "total" not in source:
                             raise ValueError(f"Pedido {source_id} incompleto; checkpoint preservado")
-                        rows = [_order_detail(payload, str(source_id))]
+                        rows.append(_order_detail(payload, str(source_id)))
                         received += 1
-                    await asyncio.sleep(REQUEST_PAUSE)
-                # Commit each inspected ID atomically with its data, including 404s.
+                    await asyncio.sleep(max(0, REQUEST_PAUSE - (time.monotonic() - request_started)))
+                inspected += 1
                 next_cursor = f"{PREFIX}{source_id - 1}:{first}"
+            # Data and cursor commit together. Errors replay the uncommitted
+            # chunk (at most ten IDs), never skipping an unresolved identifier.
+            if inspected:
                 persisted, items = await asyncio.to_thread(
                     sync._persist_sync_page, run_id, lease, sync.ORDER_HISTORY_RESOURCE, rows,
-                    page_cursor=next_cursor, next_pages=pages + 1,
+                    page_cursor=next_cursor, next_pages=pages + inspected,
                     received=received, persisted=persisted, failed=failed,
                     details_consulted=attempts, items_persisted=items,
                 )
-                pages += 1
+                pages += inspected
                 cursor = next_cursor
-                current = source_id - 1
+                current -= inspected
         if current < first:
             status = "success"
     except asyncio.CancelledError:

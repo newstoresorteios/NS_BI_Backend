@@ -454,6 +454,21 @@ RESOURCE_MAP = {
 
 
 class Adaptor:
+    def __init__(self):
+        self._client = None
+        self._healthy_until = 0.0
+        self._health_url = None
+
+    def _http_client(self):
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(timeout=httpx.Timeout(90, connect=15))
+        return self._client
+
+    async def aclose(self):
+        if self._client is not None:
+            await self._client.aclose()
+        self._healthy_until = 0.0
+
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {settings().tray_adaptor_token}"}
 
@@ -462,11 +477,14 @@ class Adaptor:
         if not cfg.tray_adaptor_url:
             return
         url = f"{cfg.tray_adaptor_url.rstrip('/')}/health"
+        if self._health_url == url and time.monotonic() < self._healthy_until:
+            return
         for attempt in range(retries):
             try:
-                async with httpx.AsyncClient(timeout=20) as client:
-                    response = await client.get(url)
+                response = await self._http_client().get(url, timeout=20)
                 if not response.is_error:
+                    self._health_url = url
+                    self._healthy_until = time.monotonic() + 60
                     return
             except TRANSIENT:
                 pass
@@ -493,23 +511,24 @@ class Adaptor:
             for attempt in range(retries):
                 try:
                     await _respect_cooldown()
-                    async with httpx.AsyncClient(
-                        timeout=httpx.Timeout(90, connect=15)
-                    ) as client:
-                        response = await client.get(
-                            url, params=params, headers=self._headers()
-                        )
+                    response = await self._http_client().get(
+                        url, params=params, headers=self._headers()
+                    )
                 except TRANSIENT as exc:
+                    self._healthy_until = 0.0
                     last_exc = exc
                     if attempt + 1 >= retries:
                         break
                     _extend_cooldown(min(2**attempt, 30.0))
                     continue
                 except httpx.RequestError as exc:
+                    self._healthy_until = 0.0
                     raise HTTPException(
                         502, f"TrayAdaptor inacessível: {type(exc).__name__}"
                     ) from exc
 
+                if response.status_code >= 500:
+                    self._healthy_until = 0.0
                 if response.status_code in RETRYABLE_STATUS and attempt + 1 < retries:
                     wait = _retry_wait(response, attempt)
                     if waited + wait <= RATE_LIMIT_BUDGET:

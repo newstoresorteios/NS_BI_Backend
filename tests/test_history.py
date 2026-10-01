@@ -12,6 +12,43 @@ from app.database import Base
 from app.models import Order, SyncRun, SyncState
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("budget,expected", [(200, [10, 20, 25]), (13, [10, 13])])
+async def test_commits_small_atomic_batches(db_factory, monkeypatch, budget, expected):
+    commits = []
+    original = sync._persist_sync_page
+    def persist(*args, **kwargs):
+        commits.append(kwargs["next_pages"])
+        return original(*args, **kwargs)
+    async def fetch(self, path, *, retries):
+        identifier = path.split("/")[-2]
+        return {"order": {"id": identifier, "date": "2020-01-01", "total": 20}, "products": []}
+    monkeypatch.setattr(sync, "_persist_sync_page", persist)
+    monkeypatch.setattr(type(history.adaptor), "_get", fetch)
+    monkeypatch.setattr(history, "BATCH_ATTEMPTS", budget)
+    history.prepare(1, 25)
+    result = await history.resume()
+    assert commits == expected
+    assert result["cursor"] == history.PREFIX + f"{25 - expected[-1]}:1"
+    assert history.daily_used() == expected[-1]
+
+
+@pytest.mark.asyncio
+async def test_error_replays_uncommitted_chunk(db_factory, monkeypatch):
+    async def fetch(self, path, *, retries):
+        identifier = path.split("/")[-2]
+        if identifier == "13":
+            raise HTTPException(503, "Temporary")
+        return {"order": {"id": identifier, "date": "2020-01-01", "total": 20}, "products": []}
+    monkeypatch.setattr(type(history.adaptor), "_get", fetch)
+    history.prepare(1, 25)
+    result = await history.resume()
+    assert result["cursor"] == history.PREFIX + "15:1"
+    assert history.daily_used() == 13
+    with db_factory() as db:
+        assert len(db.scalars(select(Order)).all()) == 10
+
+
 @pytest.fixture
 def db_factory(monkeypatch):
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)

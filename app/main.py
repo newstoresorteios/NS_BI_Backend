@@ -143,6 +143,7 @@ async def lifespan(app):
     yield
     if scheduler.running:
         scheduler.shutdown(wait=False)
+    await adaptor.aclose()
 
 
 app = FastAPI(title="NS BI API", version="1.0.0", lifespan=lifespan)
