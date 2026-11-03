@@ -497,6 +497,7 @@ class Adaptor:
         *,
         params: dict | None = None,
         retries: int = DEFAULT_RETRIES,
+        store: str | None = None,
     ) -> dict:
         cfg = settings()
         if not cfg.tray_adaptor_url or not cfg.tray_adaptor_token:
@@ -505,6 +506,9 @@ class Adaptor:
             )
         await self.wake()
         url = f"{cfg.tray_adaptor_url.rstrip('/')}{path}"
+        query = dict(params or {})
+        if store:
+            query["store"] = store
         waited = 0.0
         last_exc: Exception | None = None
         async with _request_lock:
@@ -512,7 +516,7 @@ class Adaptor:
                 try:
                     await _respect_cooldown()
                     response = await self._http_client().get(
-                        url, params=params, headers=self._headers()
+                        url, params=query, headers=self._headers()
                     )
                 except TRANSIENT as exc:
                     self._healthy_until = 0.0
@@ -559,6 +563,7 @@ class Adaptor:
         cursor: str | None = None,
         *,
         retries: int = DEFAULT_RETRIES,
+        store: str | None = None,
     ):
         if resource not in RESOURCE_MAP:
             raise HTTPException(404, f"Recurso Tray não suportado: {resource}")
@@ -593,7 +598,7 @@ class Adaptor:
                 params["page"] = 1
         if base_since and resource in {"orders", "customers"}:
             params["lastModifiedStart"] = base_since
-        payload = await self._get(path, params=params, retries=retries)
+        payload = await self._get(path, params=params, retries=retries, store=store)
         keys = (key,) if isinstance(key, str) else key
         source_rows = next(
             (
@@ -668,24 +673,25 @@ class Adaptor:
         source_id: str,
         *,
         retries: int = DEFAULT_RETRIES,
+        store: str | None = None,
     ):
         if resource != "orders":
             raise HTTPException(404, f"Detalhe Tray não suportado: {resource}")
         safe_id = quote(str(source_id), safe="")
         try:
             payload = await self._get(
-                f"/internal/orders/{safe_id}/complete", retries=retries
+                f"/internal/orders/{safe_id}/complete", retries=retries, store=store
             )
         except HTTPException as exc:
             if exc.status_code != 404:
                 raise
             payload = await self._get(
-                f"/internal/orders/{safe_id}", retries=retries
+                f"/internal/orders/{safe_id}", retries=retries, store=store
             )
         detail = _order_detail(payload, str(source_id))
         if not detail.get("data_emissao") or not detail.get("cliente_id"):
             basic_payload = await self._get(
-                f"/internal/orders/{safe_id}", retries=retries
+                f"/internal/orders/{safe_id}", retries=retries, store=store
             )
             basic = _order_detail(basic_payload, str(source_id))
             if "itens" in detail:

@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./bi.db"
     tray_adaptor_url: str = ""
     tray_adaptor_token: str = ""
+    tray_extra_stores: str = ""
     cors_origins: str = "http://localhost:5173,https://ns-bi-frontend.vercel.app"
     sync_orders_minutes: int = 10
     sync_catalog_hours: int = 6
@@ -73,6 +74,15 @@ class Settings(BaseSettings):
     @property
     def origins(self):
         return [x.strip() for x in self.cors_origins.split(",") if x.strip()]
+
+    @property
+    def extra_store_codes(self) -> list[str]:
+        codes: list[str] = []
+        for part in self.tray_extra_stores.split(","):
+            code = part.strip()
+            if code.isdigit() and code not in codes:
+                codes.append(code)
+        return codes
 
 
 @lru_cache

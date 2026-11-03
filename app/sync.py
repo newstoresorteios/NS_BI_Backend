@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from sqlalchemy import delete, func, select, text
 
 from app.adaptor import adaptor, order_history_cursor
+from app.config import settings
 from app.database import SessionLocal
 from app.domain.order_status import VALID_SALE_STATUSES, status_sql_in
 from app.models import (
@@ -33,6 +34,63 @@ from app.models import (
 
 log = logging.getLogger("uvicorn.error")
 BR_TZ = ZoneInfo("America/Sao_Paulo")
+_STORE_REF_SKIP = {"loja_id", "tray_id"}
+
+
+def extra_store_codes() -> list[str]:
+    return list(settings().extra_store_codes)
+
+
+def _prefix_ref(store: str, value):
+    if value is None or value == "":
+        return value
+    text = str(value)
+    prefix = f"{store}:"
+    if text.startswith(prefix):
+        return text
+    return f"{prefix}{text}"
+
+
+def _is_store_ref(key: str) -> bool:
+    return key == "id" or (key.endswith("_id") and key not in _STORE_REF_SKIP)
+
+
+def namespace_store_row(row: dict, store: str) -> dict:
+    """Keep the second store from colliding with the primary store's ids."""
+    original = row.get("id")
+    original_text = "" if original is None else str(original)
+    cloned = dict(row)
+    for key, value in list(cloned.items()):
+        if _is_store_ref(key):
+            cloned[key] = _prefix_ref(store, value)
+    for list_key in ("itens", "items"):
+        items = cloned.get(list_key)
+        if not isinstance(items, list):
+            continue
+        cloned[list_key] = [
+            _namespace_item(item, store) if isinstance(item, dict) else item
+            for item in items
+        ]
+    cloned["loja_id"] = store
+    cloned["tray_id"] = original_text
+    if "numero" in cloned:
+        cloned["numero"] = original_text
+    return cloned
+
+
+def _namespace_item(item: dict, store: str) -> dict:
+    cloned = dict(item)
+    for key, value in list(cloned.items()):
+        if _is_store_ref(key):
+            cloned[key] = _prefix_ref(store, value)
+    return cloned
+
+
+def _store_of_mercos_id(mercos_id: str) -> tuple[str | None, str]:
+    store, separator, raw = str(mercos_id).partition(":")
+    if separator and raw and store in set(extra_store_codes()):
+        return store, raw
+    return None, str(mercos_id)
 
 MAX_PAGES = 5000
 RESOURCE_PAUSE_SECONDS = 5
@@ -217,7 +275,9 @@ def _order_line_items(row: dict) -> list | None:
     return items if isinstance(items, list) else None
 
 
-async def _hydrate_order_details(rows: list[dict]) -> list[dict]:
+async def _hydrate_order_details(
+    rows: list[dict], store: str | None = None
+) -> list[dict]:
     """Fetch details when the v2 list payload omits the items key.
 
     Tray order lists omit line items, so the complete-order endpoint is used.
@@ -233,7 +293,10 @@ async def _hydrate_order_details(rows: list[dict]) -> list[dict]:
         if not mercos_id:
             raise ValueError("Pedido sem id no payload de listagem")
         try:
-            detail = await adaptor.detail("orders", mercos_id)
+            if store:
+                detail = await adaptor.detail("orders", mercos_id, store=store)
+            else:
+                detail = await adaptor.detail("orders", mercos_id)
         except HTTPException as exc:
             if exc.status_code == 404:
                 log.warning(
@@ -297,10 +360,20 @@ async def _backfill_missing_order_details() -> int:
         ids = await asyncio.to_thread(_orders_missing_items, MISSING_DETAIL_BATCH)
         if not ids:
             break
+        grouped: dict[str | None, list[str]] = {}
+        for mercos_id in ids:
+            store, raw_id = _store_of_mercos_id(mercos_id)
+            grouped.setdefault(store, []).append(raw_id)
         try:
-            rows = await _hydrate_order_details(
-                [{"id": mercos_id} for mercos_id in ids]
-            )
+            rows = []
+            for store, raw_ids in grouped.items():
+                hydrated = await _hydrate_order_details(
+                    [{"id": raw_id} for raw_id in raw_ids],
+                    store=store,
+                )
+                if store:
+                    hydrated = [namespace_store_row(row, store) for row in hydrated]
+                rows.extend(hydrated)
         except OrderDetailBatchError as exc:
             log.warning("Backfill de itens Tray interrompido: %s", exc)
             break
@@ -901,6 +974,7 @@ def _persist_sync_page(
     failed: int,
     details_consulted: int,
     items_persisted: int,
+    upsert_resource: str | None = None,
 ):
     with SessionLocal() as db:
         _acquire_sync_coordination_lock(db)
@@ -909,7 +983,7 @@ def _persist_sync_page(
         )
         if state is None or state.lease_token != lease_token:
             raise RuntimeError(f"Lease de sincronização perdida para {resource}")
-        stats = _upsert_rows(db, resource, rows)
+        stats = _upsert_rows(db, upsert_resource or resource, rows)
         next_persisted = persisted + stats["persisted"]
         next_items_persisted = items_persisted + stats["itemsPersisted"]
         state.cursor = page_cursor or state.cursor
@@ -1000,6 +1074,7 @@ async def sync_resource(
     *,
     raise_http=True,
     hydrate_details: bool = True,
+    store: str | None = None,
 ):
     # Short DB sessions only — never hold a pooler connection during Tray HTTP waits.
     # A missing cursor already performs the required initial import. Afterwards
@@ -1010,6 +1085,11 @@ async def sync_resource(
             "Ignoring full sync request for %s; incremental mode is mandatory", resource
         )
     full = False
+    tray_resource = resource
+    if store:
+        if not str(store).isdigit():
+            raise HTTPException(422, "Código de loja inválido")
+        resource = f"{tray_resource}@{store}"
     started_at = datetime.now(timezone.utc)
     claim = await asyncio.to_thread(_claim_sync, resource, full, started_at)
     if claim is None:
@@ -1031,29 +1111,34 @@ async def sync_resource(
     committed_cursor = cursor_before
     try:
         for _ in range(MAX_PAGES):
-            result = await adaptor.list(resource, cursor)
+            if store:
+                result = await adaptor.list(tray_resource, cursor, store=store)
+            else:
+                result = await adaptor.list(tray_resource, cursor)
             rows = result.get("data") or []
             if not rows:
                 break
             received += len(rows)
-            if hydrate_details and resource in {"orders", ORDER_HISTORY_RESOURCE}:
+            if hydrate_details and tray_resource in {"orders", ORDER_HISTORY_RESOURCE}:
                 details_needed = sum(
                     1 for row in rows if _order_line_items(row) is None
                 )
                 try:
-                    rows = await _hydrate_order_details(rows)
+                    rows = await _hydrate_order_details(rows, store=store)
                     details_consulted += details_needed
                 except OrderDetailBatchError as exc:
                     details_consulted += details_needed
                     failed += exc.failed
                     raise
+            if store:
+                rows = [namespace_store_row(row, store) for row in rows]
             next_cursor = result.get("nextCursor")
             page_cursor = result.get("pageCursor") or next_cursor or cursor
             checkpoint_cursor = (
                 next_cursor
                 or (
                     page_cursor
-                    if resource in {"orders", "customers"}
+                    if tray_resource in {"orders", "customers"}
                     else result.get("checkpointCursor")
                 )
                 or page_cursor
@@ -1075,6 +1160,7 @@ async def sync_resource(
                 failed=failed,
                 details_consulted=details_consulted,
                 items_persisted=items_persisted,
+                upsert_resource=tray_resource,
             )
             pages = next_pages
             persisted = next_persisted
@@ -1142,7 +1228,7 @@ async def sync_resource(
         # Network blips / Render cold starts — keep cursor and allow auto-resume
         source_exc = exc.first_error if isinstance(exc, OrderDetailBatchError) else exc
         unavailable = (
-            resource in OPTIONAL_CATALOG_RESOURCES
+            tray_resource in OPTIONAL_CATALOG_RESOURCES
             and isinstance(source_exc, HTTPException)
             and source_exc.status_code in {403, 404}
         )
@@ -1246,11 +1332,13 @@ async def _pause_after_resource(result: dict, *, last: bool) -> None:
     await asyncio.sleep(RESOURCE_PAUSE_SECONDS)
 
 
-async def _run_resource_sequence(resources: tuple[str, ...], full: bool) -> list[dict]:
+async def _run_resource_sequence(
+    resources: tuple[str, ...], full: bool, store: str | None = None
+) -> list[dict]:
     results = []
     total = len(resources)
     for index, resource in enumerate(resources):
-        result = await sync_resource(resource, full, raise_http=False)
+        result = await sync_resource(resource, full, raise_http=False, store=store)
         results.append(result)
         if _should_stop_pipeline(result):
             log.warning(
@@ -1263,8 +1351,15 @@ async def _run_resource_sequence(resources: tuple[str, ...], full: bool) -> list
     return results
 
 
+async def _run_for_every_store(resources: tuple[str, ...], full: bool) -> list[dict]:
+    results = await _run_resource_sequence(resources, full)
+    for store in extra_store_codes():
+        results.extend(await _run_resource_sequence(resources, full, store=store))
+    return results
+
+
 async def sync_all(full=False, *, raise_http=True):
-    results = await _run_resource_sequence(SYNC_RESOURCES, full)
+    results = await _run_for_every_store(SYNC_RESOURCES, full)
     if raise_http and results and all(r.get("status") == "error" for r in results):
         raise HTTPException(502, {"message": "Sync falhou", "results": results})
     return results
@@ -1276,12 +1371,14 @@ async def sync_orders_job():
     if await asyncio.to_thread(history.pending):
         result = await history.resume()
         if result.get("status") not in {"idle", "quota_wait"}:
+            for store in extra_store_codes():
+                await _run_resource_sequence(ORDER_SYNC_RESOURCES, False, store=store)
             return result
-    await _run_resource_sequence(ORDER_SYNC_RESOURCES, False)
+    await _run_for_every_store(ORDER_SYNC_RESOURCES, False)
 
 
 async def sync_catalog_job():
-    await _run_resource_sequence(CATALOG_RESOURCES, False)
+    await _run_for_every_store(CATALOG_RESOURCES, False)
 
 
 def prepare_order_history_sync(
