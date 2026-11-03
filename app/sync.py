@@ -1,11 +1,13 @@
 import asyncio
 import logging
 from contextlib import suppress
+from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
+import httpx
 from fastapi import HTTPException
 from sqlalchemy import delete, func, select, text
 
@@ -37,8 +39,54 @@ BR_TZ = ZoneInfo("America/Sao_Paulo")
 _STORE_REF_SKIP = {"loja_id", "tray_id"}
 
 
+_extra_stores_ctx: ContextVar[tuple[str, ...] | None] = ContextVar(
+    "tray_extra_stores", default=None
+)
+
+
 def extra_store_codes() -> list[str]:
+    current = _extra_stores_ctx.get()
+    if current is not None:
+        return list(current)
     return list(settings().extra_store_codes)
+
+
+def stores_from_adaptor_health(payload: dict) -> list[str]:
+    """Extra Tray stores published by the adaptor. The default store stays bare."""
+    default = str(payload.get("store_id") or "").strip()
+    found: list[str] = []
+    listed = payload.get("configured_stores")
+    if not isinstance(listed, list):
+        return found
+    for item in listed:
+        code = str(item).strip()
+        if code.isdigit() and code != default and code not in found:
+            found.append(code)
+    return found
+
+
+def _fetch_configured_extra_stores() -> list[str]:
+    base = (settings().tray_adaptor_url or "").strip().rstrip("/")
+    if not base:
+        return []
+    try:
+        response = httpx.get(f"{base}/health/tray", timeout=20)
+        response.raise_for_status()
+        payload = response.json()
+    except Exception:
+        log.warning("Não foi possível ler as lojas configuradas no TRAYadaptor")
+        return []
+    if not isinstance(payload, dict):
+        return []
+    return stores_from_adaptor_health(payload)
+
+
+def _resolve_extra_stores() -> list[str]:
+    codes = list(settings().extra_store_codes)
+    for code in _fetch_configured_extra_stores():
+        if code not in codes:
+            codes.append(code)
+    return codes
 
 
 def _prefix_ref(store: str, value):
@@ -1352,10 +1400,14 @@ async def _run_resource_sequence(
 
 
 async def _run_for_every_store(resources: tuple[str, ...], full: bool) -> list[dict]:
-    results = await _run_resource_sequence(resources, full)
-    for store in extra_store_codes():
-        results.extend(await _run_resource_sequence(resources, full, store=store))
-    return results
+    token = _extra_stores_ctx.set(tuple(_resolve_extra_stores()))
+    try:
+        results = await _run_resource_sequence(resources, full)
+        for store in extra_store_codes():
+            results.extend(await _run_resource_sequence(resources, full, store=store))
+        return results
+    finally:
+        _extra_stores_ctx.reset(token)
 
 
 async def sync_all(full=False, *, raise_http=True):
@@ -1371,8 +1423,14 @@ async def sync_orders_job():
     if await asyncio.to_thread(history.pending):
         result = await history.resume()
         if result.get("status") not in {"idle", "quota_wait"}:
-            for store in extra_store_codes():
-                await _run_resource_sequence(ORDER_SYNC_RESOURCES, False, store=store)
+            token = _extra_stores_ctx.set(tuple(_resolve_extra_stores()))
+            try:
+                for store in extra_store_codes():
+                    await _run_resource_sequence(
+                        ORDER_SYNC_RESOURCES, False, store=store
+                    )
+            finally:
+                _extra_stores_ctx.reset(token)
             return result
     await _run_for_every_store(ORDER_SYNC_RESOURCES, False)
 

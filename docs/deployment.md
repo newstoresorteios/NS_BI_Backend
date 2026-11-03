@@ -19,7 +19,7 @@ Variáveis obrigatórias:
 - `DATABASE_URL`
 - `TRAY_ADAPTOR_URL`
 - `TRAY_ADAPTOR_TOKEN`
-- `TRAY_EXTRA_STORES` quando houver segunda loja, por exemplo `1490060`. O adaptador precisa das variáveis `TRAY2_*` dessa loja. A loja padrão continua sem prefixo; a extra grava ids como `1490060:pedido`.
+- `TRAY_EXTRA_STORES` é opcional. Sem ela, o BI lê `configured_stores` em `/health/tray` e sincroniza cada loja além da padrão. A loja padrão continua sem prefixo; a extra grava ids como `1490060:pedido`.
 - `JWT_SECRET`
 - `AUTH_ADMIN_USERNAME` e `AUTH_ADMIN_PASSWORD`
 - `CORS_ORIGINS`

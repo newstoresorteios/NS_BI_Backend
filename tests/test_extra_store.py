@@ -27,6 +27,12 @@ def test_primary_order_id_is_not_split():
     assert sync._store_of_mercos_id("1523") == (None, "1523")
 
 
+def test_adaptor_health_lists_only_the_extra_store():
+    assert sync.stores_from_adaptor_health(
+        {"store_id": "687890", "configured_stores": ["1490060", "687890"]}
+    ) == ["1490060"]
+
+
 @pytest.mark.asyncio
 async def test_orders_job_also_syncs_the_extra_store(monkeypatch):
     seen: list[tuple[tuple[str, ...], str | None]] = []
