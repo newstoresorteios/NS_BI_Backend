@@ -47,6 +47,6 @@ async def test_orders_job_also_syncs_the_extra_store(monkeypatch):
     await sync.sync_orders_job()
 
     assert seen == [
+        (sync.EXTRA_STORE_ORDER_RESOURCES, "1490060"),
         (sync.ORDER_SYNC_RESOURCES, None),
-        (sync.ORDER_SYNC_RESOURCES, "1490060"),
     ]

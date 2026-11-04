@@ -188,6 +188,8 @@ RAW_ENTITY_RESOURCES = OPTIONAL_CATALOG_RESOURCES - {"categories", "users"}
 # Keep financial data fresh before starting the slower catalog resources.
 SYNC_RESOURCES = ("orders", *CATALOG_RESOURCES)
 ORDER_SYNC_RESOURCES = ("customers", "customer-addresses", "orders")
+# The new store must not wait for the primary store's full customer walk.
+EXTRA_STORE_ORDER_RESOURCES = ("orders", "customers", "customer-addresses")
 ORDER_HISTORY_RESOURCE = "orders-history"
 
 
@@ -1399,13 +1401,31 @@ async def _run_resource_sequence(
     return results
 
 
-async def _run_for_every_store(resources: tuple[str, ...], full: bool) -> list[dict]:
+async def _run_for_every_store(
+    resources: tuple[str, ...],
+    full: bool,
+    *,
+    extra_first: bool = False,
+    extra_resources: tuple[str, ...] | None = None,
+) -> list[dict]:
     token = _extra_stores_ctx.set(tuple(_resolve_extra_stores()))
     try:
-        results = await _run_resource_sequence(resources, full)
-        for store in extra_store_codes():
-            results.extend(await _run_resource_sequence(resources, full, store=store))
-        return results
+        extra_sequence = extra_resources or resources
+
+        async def run_extra() -> list[dict]:
+            results: list[dict] = []
+            for store in extra_store_codes():
+                results.extend(
+                    await _run_resource_sequence(extra_sequence, full, store=store)
+                )
+            return results
+
+        if extra_first:
+            extra_results = await run_extra()
+            primary = await _run_resource_sequence(resources, full)
+            return extra_results + primary
+        primary = await _run_resource_sequence(resources, full)
+        return primary + await run_extra()
     finally:
         _extra_stores_ctx.reset(token)
 
@@ -1427,12 +1447,17 @@ async def sync_orders_job():
             try:
                 for store in extra_store_codes():
                     await _run_resource_sequence(
-                        ORDER_SYNC_RESOURCES, False, store=store
+                        EXTRA_STORE_ORDER_RESOURCES, False, store=store
                     )
             finally:
                 _extra_stores_ctx.reset(token)
             return result
-    await _run_for_every_store(ORDER_SYNC_RESOURCES, False)
+    await _run_for_every_store(
+        ORDER_SYNC_RESOURCES,
+        False,
+        extra_first=True,
+        extra_resources=EXTRA_STORE_ORDER_RESOURCES,
+    )
 
 
 async def sync_catalog_job():
